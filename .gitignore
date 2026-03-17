@@ -1,0 +1,9 @@
+# Ignore R workspace files
+*.RData
+*.Rhistory
+
+# Ignore Python model files
+*.joblib
+
+# Ignore n4a files
+*.n4a
