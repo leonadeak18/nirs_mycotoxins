@@ -7,3 +7,6 @@
 
 # Ignore n4a files
 *.n4a
+
+# Ignore .zip files
+*.zip
