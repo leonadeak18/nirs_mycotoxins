@@ -1,3 +1,5 @@
+from statistics import variance
+from turtle import color
 import pandas as pd
 from sklearn.pipeline import Pipeline
 
@@ -42,10 +44,10 @@ def categorize_targets(y):
         y_class[target] = pd.cut(y[target], bins=bins, labels=labels)
     
     return y_class
-
+y_train2, y_test2 = {}, {}
 for source in sources:
-    y_train[source] = categorize_targets(y_train[source][['DON', 'Total_DON']])
-    y_test[source] = categorize_targets(y_test[source][['DON', 'Total_DON']])
+    y_train2[source] = categorize_targets(y_train[source][['DON', 'Total_DON']])
+    y_test2[source] = categorize_targets(y_test[source][['DON', 'Total_DON']])
 
 #Preprocessing pipelines
 import chemotools.scatter as ch
@@ -100,74 +102,216 @@ for material in formatted_train.keys():
     spectra_plot[material] = {}
     for prep_name in formatted_train[material].keys():
         print(f"Plotting {material} - {prep_name}")
-        spectra_plot[material][prep_name] = plot_spectra(formatted_train[material][prep_name])
+        spectra_plot[material][prep_name] = plot_spectra(formatted_train[material][prep_name], title = f"{prep_name}")
 print("All spectra plotted successfully.")
+spectra_plot['intact']['1st_derivative'].show()
 
-#### create a subplots for all the spectra
-from plotly.subplots import make_subplots
-spectra_grid = {}
-for material, preps in spectra_plot.items():
-    prep_names = list(preps.keys())
-    
-    # 1. Create the blank canvas (3x2 grid)
-    fig = make_subplots(
-        rows=2, cols=3,
-        subplot_titles=prep_names,
-        horizontal_spacing=0.1,
-        vertical_spacing=0.2
-    )
+#### create a grid of plots for each material
+from plotnine import *
+grid_spectra = {}
+for material in spectra_plot.keys():
+    grid_spectra[material] = (spectra_plot[material]['Raw']|spectra_plot[material]['SNV_Smoothing']|spectra_plot[material]['EMSC_Smoothing'])/(spectra_plot[material]['1st_derivative']|spectra_plot[material]['2nd_derivative']|spectra_plot[material]['RNV_Smoothing'])
+    grid_spectra[material] = grid_spectra[material] + theme(figure_size=(24, 10))
+    grid_spectra[material].save(f"./figures/preprocessing/all_spectra_grid_{material}.svg", dpi=600)
+print("All grid plots saved successfully.")
 
-    # 2. ADD THE SPECTRA (This is the missing step!)
-    for i, prep_name in enumerate(prep_names):
-        # Stop at 6 plots so we don't break the 3x2 grid
-        if i >= 6: break 
+
+## Plotting the spectra with the target variable as color
+### create a long format dataframe for plotting with the target variable as color
+from plotnine import theme
+
+# Format the data and merge targets
+formatted_train_with_target = {}
+for material, preps in X_train_processed.items():
+    formatted_train_with_target[material] = {
+        prep_name: format_spectra(data, material).merge(y_train2[material], left_on='Sample_ID', right_index=True)
+        for prep_name, data in preps.items()
+    }
+
+# Plot and save grids for both targets in one go
+spectra_plots = {target: {} for target in targets}
+
+for target in targets:
+    for material, preps in formatted_train_with_target.items():
+        spectra_plots[target][material] = {}
         
-        # Calculate the correct grid placement (rows 1-2, cols 1-3)
-        row = (i // 3) + 1
-        col = (i % 3) + 1
+        # A. Generate individual plots
+        for prep_name, df in preps.items():
+            print(f"Plotting {material} - {prep_name} with {target} target variable")
+            spectra_plots[target][material][prep_name] = plot_spectra(
+                df, 
+                title=f"{prep_name} with {target} categorization", 
+                color_var=target
+            )
         
-        # Grab the individual figure you generated in your previous step
-        single_fig = preps[prep_name]
+        # B. Assemble and save the grid for this material & target
+        p = spectra_plots[target][material]
+        grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+               (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
         
-        # Loop through the lines in that individual plot and add them to the grid box
-        for trace in single_fig.data:
-            trace.showlegend = False # Keep things tidy
-            fig.add_trace(trace, row=row, col=col)
+        grid = grid + theme(figure_size=(24, 10))
+        grid.save(f"./figures/preprocessing/all_spectra_grid_{material}_{target}.svg", dpi=600)
 
-    # 3. Apply the clean theme to the entire grid
-    fig.update_layout(
-        title_text=f"<b>Spectra Comparison for {material}</b>",
-        template='simple_white', 
-        showlegend=False,
-        font=dict(family="Arial", size=12) 
-    )
+# 3. Show your specific test plot
+spectra_plots['DON']['intact']['SNV_Smoothing'].show()
+
+
+## Categorize DON into 3 classes based on quantiles
+def categorize_targets3(y):
+    bins = [-float('inf'), 500, 1000, float('inf')]
+    labels = ['LC', 'UC', 'HC']
     
-    # 4. Apply axis settings to ALL subplots
-    fig.update_xaxes(
-        title_text="Wavelength (nm)", 
-        dtick=300
-    ) 
+    y_class = pd.DataFrame(index=y.index)
     
-    fig.update_yaxes(
-        title_text="Reflectance (1/R)"
+    for target in targets:
+        y_class[target] = pd.cut(y[target], bins=bins, labels=labels)
+    
+    return y_class
+
+y_train3, y_test3 = {}, {}
+for source in sources:
+    y_train3[source] = categorize_targets3(y_train[source][['DON', 'Total_DON']])
+    y_test3[source] = categorize_targets3(y_test[source][['DON', 'Total_DON']])
+
+# Format the data and merge targets
+formatted_train_with_target3 = {}
+for material, preps in X_train_processed.items():
+    formatted_train_with_target3[material] = {
+        prep_name: format_spectra(data, material).merge(y_train3[material], left_on='Sample_ID', right_index=True)
+        for prep_name, data in preps.items()
+    }
+
+# Plot and save grids for both targets in one go
+spectra_plots3 = {target: {} for target in targets}
+
+for target in targets:
+    for material, preps in formatted_train_with_target3.items():
+        spectra_plots3[target][material] = {}
+        
+        # A. Generate individual plots
+        for prep_name, df in preps.items():
+            print(f"Plotting {material} - {prep_name} with {target} target variable")
+            spectra_plots3[target][material][prep_name] = plot_spectra(
+                df, 
+                title=f"{prep_name} with {target} categorization", 
+                color_var=target
+            )
+        
+        # B. Assemble and save the grid for this material & target
+        p = spectra_plots3[target][material]
+        grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+               (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
+        
+        grid = grid + theme(figure_size=(24, 10))
+        grid.save(f"./figures/preprocessing/all_spectra_grid3_{material}_{target}.svg", dpi=600)
+
+
+### Create a bar chart for the distribution of the categorized target variable
+target_distribution = {}
+for source in sources:
+    target_distribution[source] = {}
+    for target in targets:
+        target_distribution[source][target] = y_train2[source][target].value_counts().reset_index()
+        target_distribution[source][target].columns = ['Category', 'Count']
+        target_distribution[source][target]['Source'] = source
+        target_distribution[source][target]['Target'] = target
+target_distribution_df = pd.concat([df for source in target_distribution.values() for df in source.values()], ignore_index=True)
+
+bar_plot = (
+    ggplot(target_distribution_df, aes(x='Source', y='Count', fill='Category')) +
+    geom_bar(stat='identity', position='dodge') +
+    facet_wrap('~Target') +
+    labs(title='Distribution of Categorized Target Variables', x='Source', y='Count') +
+    theme_classic() +
+    scale_fill_manual(values=['#70c8e2', '#e54b2c']) +
+    theme(
+        title=element_text(size=12),
+        axis_title=element_text(size=10),
+        legend_position="right"
     )
+)
+bar_plot.save("./figures/preprocessing/target_distribution_bar_plot.svg", dpi=600)
 
-    spectra_grid[material] = fig
+### Bar chart for 3-category distribution
+target_distribution3 = {}
+for source in sources:
+    target_distribution3[source] = {}
+    for target in targets:
+        target_distribution3[source][target] = y_train3[source][target].value_counts().reset_index()
+        target_distribution3[source][target].columns = ['Category', 'Count']
+        target_distribution3[source][target]['Source'] = source
+        target_distribution3[source][target]['Target'] = target
+target_distribution3_df = pd.concat([df for source in target_distribution3.values() for df in source.values()], ignore_index=True)
 
-# Display the plot
-spectra_grid['ground'].show()
-spectra_grid['intact'].show()
+bar_plot3 = (
+    ggplot(target_distribution3_df, aes(x='Source', y='Count', fill='Category')) +
+    geom_bar(stat='identity', position='dodge') +
+    facet_wrap('~Target') +
+    labs(title='Distribution of 3-Category Target Variables', x='Source', y='Count') +
+    theme_classic() +
+    scale_fill_manual(values=['#70c8e2', 'black', '#e54b2c']) +
+    theme(
+        title=element_text(size=12),
+        axis_title=element_text(size=10),
+        legend_position="right"
+    )
+)
+bar_plot3.save("./figures/preprocessing/target_distribution_bar_plot3.svg", dpi=600)
 
-#export the plot as a high-resolution image
-# spectra_grid["ground"].write_image("./figures/preprocessing/ground.png")
-# spectra_grid["intact"].write_image("./figures/preprocessing/intact.png")
 
-# Dimentionality reduction techniques
-from sklearn.decomposition import PCA, FastICA, KernelPCA, FactorAnalysis
-dr_pipelines = {
-    "None": None,
-    "PCA": PCA(n_components=0.99),
-    "ICA": FastICA(n_components=0.99, random_state=123),
-    "KernelPCA": KernelPCA(n_components=0.99, kernel='rbf', gamma=1),
-    "FA": FactorAnalysis(n_components=0.99)
-}
+######## PCA analysis of the train spectra ############
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+pca_df = {}
+pca_df2 = {}
+pca_df3 = {}
+pca_df_variance_explained = {}
+for material in X_train_processed.keys():
+    pca_df[material] = {}
+    pca_df2[material] = {}
+    pca_df3[material] = {}
+    pca_df_variance_explained[material] = {}
+    for prep_name in X_train_processed[material].keys():
+        print(f"Performing PCA for {material} - {prep_name}")
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_train_processed[material][prep_name])
+        
+        pca = PCA(n_components=4)
+        X_pca = pca.fit_transform(X_scaled)
+        explained_variance = pca.explained_variance_ratio_
+        pca_df_variance_explained[material][prep_name] = explained_variance
+        
+        pca_df[material][prep_name] = pd.DataFrame(X_pca, columns=['PC1', 'PC2', 'PC3', 'PC4'], index=X_train_processed[material][prep_name].index)
+        pca_df2[material][prep_name] = pca_df[material][prep_name].merge(y_train2[material], left_index=True, right_index=True)
+        pca_df3[material][prep_name] = pca_df[material][prep_name].merge(y_train3[material], left_index=True, right_index=True)
+
+from utils.plotting import plot_pca
+pca_plots = {}
+for target in targets:
+    pca_plots[target] = {}
+    for material in pca_df2.keys():
+        pca_plots[target][material] = {}
+        for prep_name, df in pca_df2[material].items():
+            print(f"Plotting PCA for {material} - {prep_name}")
+            pca_plots[target][material][prep_name] = plot_pca(df, variance_explained=pca_df_variance_explained[material][prep_name], title=f"PCA of {prep_name}", color_var=target)
+        
+        #assemble and save the grid for this material & target
+        p = pca_plots[target][material]
+        grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+               (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
+        grid = grid + theme(figure_size=(24, 10))
+        grid.save(f"./figures/PCA/pca_grid_{material}_{target}.svg", dpi=600)
+
+    for material in pca_df3.keys():
+        pca_plots[target][material] = {}
+        for prep_name, df in pca_df3[material].items():
+            print(f"Plotting PCA for {material} - {prep_name} with 3-category target")
+            pca_plots[target][material][prep_name] = plot_pca(df, variance_explained=pca_df_variance_explained[material][prep_name], title=f"PCA of {prep_name} with 3-category target", color_var=target)
+        
+        #assemble and save the grid for this material & target
+        p = pca_plots[target][material]
+        grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+               (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
+        grid = grid + theme(figure_size=(24, 10))
+        grid.save(f"./figures/PCA/pca_grid_{material}_{target}_3_category.svg", dpi=600)

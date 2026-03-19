@@ -1,7 +1,7 @@
 ## import alll necessary libraries
-from plotly.graph_objs.layout import xaxis
+from plotnine import scale_x_continuous
 import pandas as pd
-import plotly.express as px
+from plotnine import *
 
 
 def format_spectra(df, data_name):
@@ -34,40 +34,47 @@ def format_spectra(df, data_name):
     
     return long_df
 
-
-import plotly.express as px
-
-def plot_spectra(df):
-    fig = px.line(
-        df,
-        x='Wavelength',
-        y='Reflectance (1/R)',
-        color='Sample_ID',
-        hover_data=['Sample_ID'], 
-        color_discrete_sequence=px.colors.sequential.Viridis, 
-        labels={
-            'Wavelength': 'Wavelength (nm)', 
-            'Reflectance (1/R)': 'Reflectance (1/R)'
-        }
-    )
-    
-    # Apply layout improvements for a crisp, publication-ready look
-    fig.update_layout(
-        template='simple_white', 
-        showlegend = False,
-        xaxis=dict(dtick = 200),
-        font=dict(family="Arial", size=12) 
-    )
-    
-    # Ensure clean lines and a helpful hover tooltip
-    fig.update_traces(
-        mode='lines', 
-        line=dict(width=1.5), 
-        hovertemplate=(
-            "<b>Sample:</b> %{customdata[0]}<br>" + 
-            "<b>Wavelength:</b> %{x} nm<br>" +
-            "<b>Reflectance:</b> %{y:.4f}<extra></extra>"
+## spectra plotting function
+def plot_spectra(spectra, title, color_var = "Sample_ID"):
+    num_categories = spectra[color_var].nunique()
+    base_plot = (
+        ggplot(spectra, aes(x='Wavelength', y=spectra.columns[2], group='Sample_ID', color = color_var)) +
+        geom_line(size = 0.5) +
+        labs(x= "Wavelength (nm)", y=spectra.columns[2], title = title) +
+        scale_x_continuous(breaks=range(400, 2500, 300)) +
+        theme_classic() +
+        theme(
+            title=element_text(size=12),
+            axis_title=element_text(size=10)
+            )
         )
-    )
+    if num_categories == 2:
+        output = base_plot + scale_color_manual(values=['#70c8e2', '#e54b2c']) + theme(legend_position = "right")
+    elif num_categories == 3:
+        output = base_plot + scale_color_manual(values=['#70c8e2', 'black', '#e54b2c']) + theme(legend_position = "right")
+    else:
+        output = base_plot + scale_color_cmap_d(cmap_name="viridis_r") + theme(legend_position = "none")
 
-    return fig
+    return output
+
+## PCA plotting function
+def plot_pca(pca_df, variance_explained, title, color_var):
+    num_categories = pca_df[color_var].nunique()
+    base_plot = (
+        ggplot(pca_df, aes(x='PC1', y='PC2', color=color_var)) +
+        geom_point(size=3) +
+        labs(x=f"PC1 ({variance_explained[0]*100:.2f}%)", y=f"PC2 ({variance_explained[1]*100:.2f}%)", title=title) +
+        theme_classic() +
+        theme(
+            title=element_text(size=12),
+            axis_title=element_text(size=10)
+            )
+        )
+    if num_categories == 2:
+        output = base_plot + scale_color_manual(values=['#70c8e2', '#e54b2c']) + theme(legend_position = "right")
+    elif num_categories == 3:
+        output = base_plot + scale_color_manual(values=['#70c8e2', 'black', '#e54b2c']) + theme(legend_position = "right")
+    else:
+        output = base_plot + scale_color_cmap_d(cmap_name="viridis_r") + theme(legend_position = "none")
+
+    return output
