@@ -1,5 +1,4 @@
-from statistics import variance
-from turtle import color
+from plotnine import scale_y_continuous
 import pandas as pd
 from sklearn.pipeline import Pipeline
 
@@ -33,7 +32,7 @@ for key in y_train:
     #remove Total_DON and Log_Total_DON columns from y_train
     y_train[key] = y_train[key].drop(columns=['Log_DON', 'Log_Total_DON'])
 
-## Categorize DON into 2 classes based on quantiles
+## Categorize DON into 2 classes
 def categorize_targets(y):
     bins = [-float('inf'), 1000, float('inf')]
     labels = ['LC', 'HC']
@@ -44,6 +43,7 @@ def categorize_targets(y):
         y_class[target] = pd.cut(y[target], bins=bins, labels=labels)
     
     return y_class
+
 y_train2, y_test2 = {}, {}
 for source in sources:
     y_train2[source] = categorize_targets(y_train[source][['DON', 'Total_DON']])
@@ -158,7 +158,7 @@ spectra_plots['DON']['intact']['SNV_Smoothing'].show()
 
 ## Categorize DON into 3 classes based on quantiles
 def categorize_targets3(y):
-    bins = [-float('inf'), 500, 1000, float('inf')]
+    bins = [-float('inf'), 500, 1500, float('inf')]
     labels = ['LC', 'UC', 'HC']
     
     y_class = pd.DataFrame(index=y.index)
@@ -223,6 +223,7 @@ bar_plot = (
     facet_wrap('~Target') +
     labs(title='Distribution of Categorized Target Variables', x='Source', y='Count') +
     theme_classic() +
+    scale_y_continuous(limits=(0, 250)) +
     scale_fill_manual(values=['#70c8e2', '#e54b2c']) +
     theme(
         title=element_text(size=12),
@@ -249,6 +250,7 @@ bar_plot3 = (
     facet_wrap('~Target') +
     labs(title='Distribution of 3-Category Target Variables', x='Source', y='Count') +
     theme_classic() +
+    scale_y_continuous(limits=(0, 250)) +
     scale_fill_manual(values=['#70c8e2', 'black', '#e54b2c']) +
     theme(
         title=element_text(size=12),
