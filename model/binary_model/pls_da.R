@@ -180,7 +180,7 @@ pipeline_2_plsda <- function(X_list, y_list, max_comp = 20, k_folds = 10, n_iter
 }
 
 # Run the pipeline
-don_plsda <- pipeline_2_plsda(X_list = spectra, y_list = ref, max_comp = 20, k_folds = 10, n_iter = 10, pb = FALSE)
+don_plsda <- pipeline_2_plsda(X_list = spectra, y_list = ref, max_comp = 20, k_folds = 10, n_iter = 10, pb = TRUE)
 
 # Save the outputs
 write.csv(don_plsda, "./results/2_plsda_results.csv", row.names = FALSE)

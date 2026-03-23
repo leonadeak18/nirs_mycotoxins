@@ -119,11 +119,11 @@ pipeline_2_splsda <- function(X_list, y_list, max_comp = 20, k_folds = 10, n_ite
         X_prep <- prep_methods[[prep_name]](X_material)
         
         # Execute sPLS-DA with cross-validation
-        tune_splsda <- tune.splsda(X, y, ncomp = 20, max.iter = 1000, near.zero.var = TRUE, test.keepX = list.keepX, validation = 'Mfold', folds = 10, progressBar = TRUE, nrepeat = 10, BPPARAM = parallel_param, seed = 123)
+        tune_splsda <- tune.splsda(X_prep, y_toxin, ncomp = 20, max.iter = 1000, near.zero.var = TRUE, test.keepX = list.keepX, validation = 'Mfold', folds = 10, progressBar = TRUE, nrepeat = 10, BPPARAM = parallel_param, seed = 123)
         # Optimal number of components based on t-tests on the error rate
         ncomp <- tune_splsda$choice.ncomp$ncomp
         select.keepX <- tune_splsda$choice.keepX[1:ncomp] 
-        splsda_model <- splsda(X, y, ncomp = ncomp, keepX = select.keepX) 
+        splsda_model <- splsda(X_prep, y_toxin, ncomp = ncomp, keepX = select.keepX) 
         perf_splsda <- perf(splsda_model, validation = 'Mfold', folds = k_folds, 
                            progressBar = TRUE, nrepeat = n_iter, BPPARAM = parallel_param, seed = 123)
         
