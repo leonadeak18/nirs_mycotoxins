@@ -71,7 +71,7 @@ prep_methods <- list(
 )
 
 # Main function
-pipeline_3_plsda <- function(X_list, y_list, max_comp = 20, k_folds = 10, n_iter = 10) {
+pipeline_3_plsda <- function(X_list, y_list, max_comp = 30, k_folds = 10, n_iter = 10) {
   
   #define an empty list to store results
   results_list <- list() 
