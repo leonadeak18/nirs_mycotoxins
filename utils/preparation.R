@@ -25,3 +25,15 @@ binary_transform <- function(df, cutoff = 1000) {
   
   return(output)
 }
+
+three_level_transform <- function(df, cutoff = 1000, uncertainty_percent = 0.5) {
+  output <- data.frame(
+    X = df[, 1],
+    class = factor(ifelse(df[, 2] > cutoff * (1 + uncertainty_percent), "HC",
+                          ifelse(df[, 2] < cutoff * (1 - uncertainty_percent), "LC", "UC")))
+  )
+  rownames(output) <- output$X
+  output <- output[, -1, drop = FALSE]
+  
+  return(output)
+}
