@@ -54,8 +54,9 @@ library(mixOmics)
 library(spectacles)
 library(prospectr)
 library(EMSC)
+library(BiocParallel)
 
-# 1. Define preprocessing methods
+# Define preprocessing methods
 prep_methods <- list(
   'Raw'     = function(x) savitzkyGolay(x, w = 15, p = 2, m = 0),
   'SNV'     = function(x) savitzkyGolay(standardNormalVariate(x), w = 15, p = 2, m = 0),
@@ -71,8 +72,29 @@ prep_methods <- list(
 )
 
 # Main function
-pipeline_2_plsda <- function(X_list, y_list, max_comp = 20, k_folds = 10, n_iter = 10) {
+pipeline_2_plsda <- function(X_list, y_list, max_comp = 20, k_folds = 10, n_iter = 10, pb = TRUE) {
+  #define cores for parallel processing
+  n_cores <- round(parallel::detectCores() * 0.9, 0)
+  #auto set correct parallel assignment for mixOmics perf function
+  if (.Platform$OS.type == "unix") {
   
+  parallel_param <- MulticoreParam(workers = n_cores)
+  message("Linux/Mac detected: Using MulticoreParam with ", n_cores, " cores.")
+  
+  } else if (.Platform$OS.type == "windows") {
+  
+  # Triggered on Windows
+  parallel_param <- SnowParam(workers = n_cores)
+  message("Windows detected: Using SnowParam with ", n_cores, " cores.")
+  
+  } else {
+  
+  # Fallback for unsupported systems to prevent crashes
+  parallel_param <- SerialParam()
+  message("Unrecognized OS: Defaulting to sequential processing (1 core).")
+  
+  }
+
   #define an empty list to store results
   results_list <- list() 
   distance_metrics <- c('max.dist', 'centroids.dist', 'mahalanobis.dist')
@@ -100,7 +122,7 @@ pipeline_2_plsda <- function(X_list, y_list, max_comp = 20, k_folds = 10, n_iter
         # Execute PLS-DA with cross-validation
         plsda_model <- plsda(X_prep, y_toxin, ncomp = max_comp, max.iter = 1000, near.zero.var = TRUE)
         perf_plsda <- perf(plsda_model, validation = 'Mfold', folds = k_folds, 
-                           progressBar = TRUE, nrepeat = n_iter)
+                           progressBar = pb, nrepeat = n_iter, BPPARAM = parallel_param, seed = 123)
         
         # message() is generally preferred over print() for progress updates in R loops
         message(paste(dataset_name, "- Preprocessing:", prep_name, "is done"))
@@ -158,20 +180,9 @@ pipeline_2_plsda <- function(X_list, y_list, max_comp = 20, k_folds = 10, n_iter
 }
 
 # Run the pipeline
-don_plsda <- pipeline_2_plsda(X_list = spectra, y_list = ref, max_comp = 20, k_folds = 10, n_iter = 10)
+don_plsda <- pipeline_2_plsda(X_list = spectra, y_list = ref, max_comp = 20, k_folds = 10, n_iter = 10, pb = FALSE)
 
 # Save the outputs
 write.csv(don_plsda, "./results/2_plsda_results.csv", row.names = FALSE)
 save.image("./results/2_plsda_results.RData")
 load("./results/2_plsda_results.RData")
-
-# Execute PLS-DA with cross-validation
-X <- spectra[["train"]][["intact"]]
-y <- as.factor(unlist(ref[["train"]][["intact"]][["DON"]]))
-library(mixOmics)
-plsda_model <- plsda(X, y, ncomp = 20, max.iter = 1000, near.zero.var = TRUE)
-perf_plsda <- perf(plsda_model, validation = 'Mfold', folds = 10, 
-                           progressBar = TRUE, nrepeat = 3)
-prediction_trial <- predict(plsda_model, spectra[["test"]][["intact"]], dist = "max.dist")        
-trial <- data.frame(prediction_trial$class$max.dist[,12], Truth = as.factor(unlist(ref[["test"]][["intact"]][["DON"]])))
-trial_auc <- auroc(prediction_trial)
