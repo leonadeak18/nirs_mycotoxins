@@ -1,6 +1,3 @@
-from plotly.data import experiment
-from model.probability_model.training import upper_thresholds
-from model.probability_model.training import n_repeats
 import pandas as pd
 import numpy as np
 import time
@@ -183,17 +180,43 @@ for source in sources:
                 except Exception as e:
                     print(f"Failed. Error: {str(e)}")
 #combine all results into a dataframe for easier analysis
-optimization_algorithm = pd.DataFrame(experiment_results)
+optimizied_algorithm = pd.DataFrame(experiment_results)
 
 # ==========================================
 # ROBUST THRESHOLD FINDING FOR SVM
 # ==========================================
 all_results = []
-calibrated_methods = ["sigmoid", "isotonic"]
+calibration_methods = ["sigmoid", "isotonic"]
 n_repeats = 1000
 target_precision = 0.95
-upper_thresholds = []
-lower_thresholds = []
+
+optimized_model = {
+    "intact_DON": Pipeline ([
+        ('preprocessing', preprocessing_pipelines["RNV_Smoothing"]),
+        ('feature_selection', feature_pipelines["Factor_Analysis"]),
+        ('svc', SVC(kernel='rbf', C=10, gamma=0.001, class_weight='balanced', random_state=270725, probability=True))
+        ]),
+    "intact_Total_DON": Pipeline([
+        ('preprocessing', preprocessing_pipelines["RNV_Smoothing"]),
+        ('feature_selection', feature_pipelines["Factor_Analysis"]),
+        ('svc', SVC(kernel='rbf', C=5, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
+        ]),
+    "ground_DON": Pipeline([
+        ('preprocessing', preprocessing_pipelines["RNV_Smoothing"]),
+        ('feature_selection', feature_pipelines["RFE"]),
+        ('svc', SVC(kernel='rbf', C=1000, gamma='auto', class_weight='balanced', random_state=270725, probability=True))
+        ]),
+    "ground_Total_DON": Pipeline([
+        ('preprocessing', preprocessing_pipelines["RNV_Smoothing"]),
+        ('feature_selection', feature_pipelines["ANOVA_Pencentile"]),
+        ('svc', SVC(kernel='rbf', C=1000, gamma=0.001, class_weight='balanced', random_state=270725, probability=True))
+        ])
+}
+
+
+base_pipeline = optimized_model["ground_DON"]
+pipe_name = list(base_pipeline.named_steps.keys())[0]
+fp_name = list(base_pipeline.named_steps.keys())[1]
 
 for source in sources:
     for target in targets:
@@ -206,52 +229,49 @@ for source in sources:
         # Ensure target variables are 1D arrays
         y_tr = y_train[source][target].values
         y_te = y_test[source][target].values
+        dataset_key = f"{source}_{target}"
         
-        for pipe_name, preprocessor in preprocessing_pipelines.items():
-            # Fit/transform on training data, ONLY transform on testing data
-                X_train_raw = preprocessor.fit_transform(X_tr)
-                X_test_raw = preprocessor.transform(X_te)
+        if dataset_key not in optimized_model:
+            continue
+        
+        base_pipeline = optimized_model[dataset_key]
+        pipe_name = list(base_pipeline.named_steps.keys())[0]
+        fp_name = list(base_pipeline.named_steps.keys())[1]
 
-                for fp_name, fp_method in feature_pipelines.items():
-                    print(f"\n--- Preprocessing: {pipe_name} | Feature Selection: {fp_name} ---")
-                    if fp_method is not None:
-                        X_tr_final = fp_method.fit_transform(X_train_raw)
-                        X_te_final = fp_method.transform(X_test_raw)
-                    else:
-                        X_tr_final = X_train_raw
-                        X_te_final = X_test_raw
+        for method in calibration_methods:
+            print(f"  -> Applying Calibration with {method} method...")
+            calibrated_model = CalibratedClassifierCV(base_pipeline, cv=10, method=method)
+
+            upper_thresholds = []
+            lower_thresholds = []
+
+            for i in range(n_repeats):
+                cv_strategy = StratifiedKFold(n_splits=10, shuffle=True, random_state=i)
+                cv_probs = cross_val_predict(calibrated_model, X_tr, y_tr, cv=cv_strategy, method='predict_proba', n_jobs=-1)
                 
-                    # Initialize and run SVM
-                    for method in calibrated_methods:
-                        for i in range(n_repeats):
-                            clf = SVC(kernel = 'rbf', random_state=270725, probability=True)
-                            calibrated_clf = CalibratedClassifierCV(clf, cv=10, method=method, n_jobs=-1)
-                            cv_probs = cross_val_predict(calibrated_clf, X_tr_final, y_tr, cv=StratifiedKFold(n_splits=10, shuffle=True, random_state=270725), method='predict_proba', n_jobs=-1)
-                            
-                            # Calculate Upper Threshold (High Contamination)
-                            prec_high, _, thresh_high = precision_recall_curve(y_train, cv_probs[:, 1])
-                            valid_idx_high = np.where(prec_high[:-1] >= target_precision)[0]
-                            if len(valid_idx_high) > 0:
-                                upper_thresholds.append(thresh_high[valid_idx_high[0]])
-                                
-                            # Calculate Lower Threshold (Low Contamination)
-                            prec_low, _, thresh_low = precision_recall_curve(1 - y_train, cv_probs[:, 0])
-                            valid_idx_low = np.where(prec_low[:-1] >= target_precision)[0]
-                            if len(valid_idx_low) > 0:
-                                lower_thresholds.append(1 - thresh_low[valid_idx_low[0]])
+                # Calculate Upper Threshold (High Contamination)
+                prec_high, _, thresh_high = precision_recall_curve(y_tr, cv_probs[:, 1])
+                valid_idx_high = np.where(prec_high[:-1] >= target_precision)[0]
+                if len(valid_idx_high) > 0:
+                    upper_thresholds.append(thresh_high[valid_idx_high[0]])
+                    
+                # Calculate Lower Threshold (Low Contamination)
+                prec_low, _, thresh_low = precision_recall_curve(1 - y_tr, cv_probs[:, 0])
+                valid_idx_low = np.where(prec_low[:-1] >= target_precision)[0]
+                if len(valid_idx_low) > 0:
+                    lower_thresholds.append(1 - thresh_low[valid_idx_low[0]])
 
-                            # Calculate the medians to ignore outliers
-                            optimal_upper_thresh = np.median(upper_thresholds)
-                            optimal_lower_thresh = np.median(lower_thresholds)
-
-                            
-                            # Save results to a dataframe for this combination
-                            all_results.append({
-                                "Material": source,
-                                "Target": target,
-                                "Preprocessing": pipe_name,
-                                "Feature_Selection": fp_name,
-                                "Calibration_Method": method,
-                                'Upper Thresholds': upper_thresholds,
-                                'Lower Thresholds': lower_thresholds
-                            })
+            # Save results to a dataframe for this combination
+            all_results.append({
+                "Material": source,
+                "Target": target,
+                "Preprocessing": pipe_name,
+                "Feature_Selection": fp_name,
+                "Calibration_Method": method,
+                "Median_Upper_Thresholds": np.median(upper_thresholds),
+                'Average_Upper_Thresholds': np.mean(upper_thresholds),
+                'Stdev_Upper_Thresholds': np.std(upper_thresholds),
+                'Median_Lower_Thresholds': np.median(lower_thresholds),
+                'Average_Lower_Thresholds': np.mean(lower_thresholds),
+                'Stdev_Lower_Thresholds': np.std(lower_thresholds),
+            })
