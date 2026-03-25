@@ -101,7 +101,7 @@ def specificity_score(y_true, y_pred, sample_weight=None):
 
 # create a scoring dictionary
 scoring_metrics = {
-    'roc_auc': make_scorer(roc_auc_score, response_method=True),
+    'roc_auc': make_scorer(roc_auc_score, response_method="predict_proba"),
     'accuracy': make_scorer(accuracy_score),
     'sensitivity': make_scorer(recall_score), # Sensitivity is the same as Recall
     'specificity': make_scorer(specificity_score)
@@ -157,7 +157,7 @@ for source in sources:
                         continue
 
                     # Define base SVC model
-                    base_svm = SVC(kernel='rbf', class_weight='balanced', random_state=270725)
+                    base_svm = SVC(kernel='rbf', class_weight='balanced', random_state=270725, probability=True)
                     
                     # Run Randomized Search to find the best C and Gamma
                     random_search = RandomizedSearchCV(
