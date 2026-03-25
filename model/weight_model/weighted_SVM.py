@@ -11,7 +11,7 @@ from sklearn.metrics import (roc_auc_score, accuracy_score, recall_score, confus
 # IMPORT THE DATA
 # ==========================================
 from nirs.nirs_dataset import X_train, y_train, X_test, y_test
-from utils.preparation import binary_transform
+from utils.preparation import binary_transform_with_weight
 
 # Define the scopes
 sources = ['intact', 'ground']
@@ -24,7 +24,7 @@ for key in y_test:
 
 ## Categorize into 2 classes based on quantiles
 for source in sources:
-    y_test[source], y_train[source] = binary_transform(y_test[source]), binary_transform(y_train[source])
+    y_test[source], y_train[source] = binary_transform_with_weight(y_test[source]), binary_transform_with_weight(y_train[source])
 
 
 # ==========================================
@@ -124,6 +124,10 @@ for source in sources:
         # Ensure target variables are 1D arrays
         y_tr = y_train[source][target].values
         y_te = y_test[source][target].values
+        
+        # Explicitly map 'HC' to 1 and 'LC' to 0
+        y_tr = np.where(y_train[source][target].values == 'HC', 1, 0)
+        y_te = np.where(y_test[source][target].values == 'HC', 1, 0)
 
         #samples weight
         tr_weights = y_train[source][target + '_weight'].values
