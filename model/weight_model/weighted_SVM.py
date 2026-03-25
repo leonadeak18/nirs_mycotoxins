@@ -101,7 +101,7 @@ def specificity_score(y_true, y_pred, sample_weight=None):
 
 # create a scoring dictionary
 scoring_metrics = {
-    'roc_auc': make_scorer(roc_auc_score, needs_proba=True),
+    'roc_auc': make_scorer(roc_auc_score, response_method=True),
     'accuracy': make_scorer(accuracy_score),
     'sensitivity': make_scorer(recall_score), # Sensitivity is the same as Recall
     'specificity': make_scorer(specificity_score)
