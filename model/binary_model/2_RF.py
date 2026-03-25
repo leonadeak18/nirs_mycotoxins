@@ -35,25 +35,25 @@ import chemotools.scatter as ch
 from chemotools.derivative import SavitzkyGolay
 preprocessing_pipelines = {
     "Raw": Pipeline([
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ]),
     "SNV_Smoothing": Pipeline([
         ('snv', ch.StandardNormalVariate()),
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ]),
     "EMSC_Smoothing": Pipeline([
         ('emsc', ch.ExtendedMultiplicativeScatterCorrection()),
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ]),
     "1st_derivative": Pipeline([
-        ('first_derivative', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 1))
+        ('first_derivative', SavitzkyGolay(window_length=15, polyorder=2, deriv = 1))
     ]),
     "2nd_derivative": Pipeline([
-        ('second_derivative', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 2))
+        ('second_derivative', SavitzkyGolay(window_length=15, polyorder=2, deriv = 2))
     ]),
     "RNV_Smoothing": Pipeline([
         ('rnv', ch.RobustNormalVariate()),
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ])
 }
 
@@ -166,7 +166,8 @@ for source in sources:
                         param_distributions=rf_param_dist,
                         n_iter=50,          
                         cv=10,
-                        scoring=scoring_metrics,  
+                        scoring=scoring_metrics,
+                        refit='roc_auc',  
                         n_jobs=-1,          
                         random_state=270725
                     )

@@ -36,25 +36,25 @@ import chemotools.scatter as ch
 from chemotools.derivative import SavitzkyGolay
 preprocessing_pipelines = {
     "Raw": Pipeline([
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ]),
     "SNV_Smoothing": Pipeline([
         ('snv', ch.StandardNormalVariate()),
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ]),
     "EMSC_Smoothing": Pipeline([
         ('emsc', ch.ExtendedMultiplicativeScatterCorrection()),
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ]),
     "1st_derivative": Pipeline([
-        ('first_derivative', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 1))
+        ('first_derivative', SavitzkyGolay(window_length=15, polyorder=2, deriv = 1))
     ]),
     "2nd_derivative": Pipeline([
-        ('second_derivative', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 2))
+        ('second_derivative', SavitzkyGolay(window_length=15, polyorder=2, deriv = 2))
     ]),
     "RNV_Smoothing": Pipeline([
         ('rnv', ch.RobustNormalVariate()),
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ])
 }
 
@@ -103,8 +103,8 @@ def specificity_score(y_true, y_pred, sample_weight=None):
 
 # create a scoring dictionary
 scoring_metrics = {
-    'roc_auc': 'roc_auc',
-    'accuracy': 'accuracy',
+    'roc_auc': make_scorer(roc_auc_score, needs_proba=True),
+    'accuracy': make_scorer(accuracy_score),
     'sensitivity': make_scorer(recall_score), # Sensitivity is the same as Recall
     'specificity': make_scorer(specificity_score)
 }
@@ -118,7 +118,7 @@ rf_param_dist = {
     'min_samples_leaf': [1, 2, 4, 10, 20]
 }
 
-rf_experiment_results = []
+wrf_experiment_results = []
 for source in sources:
     for target in targets:
         print(f"Evaluating: {source} samples for {target}")
@@ -167,7 +167,8 @@ for source in sources:
                         param_distributions=rf_param_dist,
                         n_iter=50,          
                         cv=10,
-                        scoring=scoring_metrics,  
+                        scoring=scoring_metrics,
+                        refit='roc_auc',  
                         n_jobs=-1,          
                         random_state=270725
                     )
@@ -202,7 +203,7 @@ for source in sources:
                     print(f"Done! (Test AUC: {test_auc:.3f})")
                     
                     # 4. Save the results
-                    rf_experiment_results.append({
+                    wrf_experiment_results.append({
                         'Sample_Source': source,
                         'Target_Toxin': target,
                         'Preprocessing': pipe_name,
@@ -226,5 +227,5 @@ for source in sources:
                 except Exception as e:
                     print(f"Failed. Error: {str(e)}")
 #combine all results into a dataframe for easier analysis
-optimizied_RF = pd.DataFrame(rf_experiment_results)
+optimizied_RF = pd.DataFrame(wrf_experiment_results)
 optimizied_RF.to_csv('./results/weighted_RF_results.csv', index=False)
