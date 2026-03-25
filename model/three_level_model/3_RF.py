@@ -129,10 +129,6 @@ for source in sources:
         # Ensure target variables are 1D arrays
         y_tr = y_train[source][target].values
         y_te = y_test[source][target].values
-
-        #samples weight
-        tr_weights = y_train[source][target + '_weight'].values
-        te_weights = y_test[source][target + '_weight'].values
         
         for pipe_name, preprocessor in preprocessing_pipelines.items():
             # Apply Scatter Corrections / Derivatives
@@ -227,4 +223,4 @@ for source in sources:
                     print(f"Failed. Error: {str(e)}")
 #combine all results into a dataframe for easier analysis
 optimizied_RF = pd.DataFrame(rf_experiment_results)
-optimizied_RF.to_csv('./results/weighted_RF_results.csv', index=False)
+optimizied_RF.to_csv('./results/3_RF_results.csv', index=False)

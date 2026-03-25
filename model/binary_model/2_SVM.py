@@ -124,10 +124,6 @@ for source in sources:
         # Ensure target variables are 1D arrays
         y_tr = y_train[source][target].values
         y_te = y_test[source][target].values
-
-        #samples weight
-        tr_weights = y_train[source][target + '_weight'].values
-        te_weights = y_test[source][target + '_weight'].values
         
         for pipe_name, preprocessor in preprocessing_pipelines.items():
             # Apply Scatter Corrections / Derivatives
