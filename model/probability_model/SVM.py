@@ -292,6 +292,11 @@ for source in sources:
 # Combine all results into a single DataFrame
 threshold_results = pd.DataFrame(all_results)
 
+## Export all important results
+### export the model
+import joblib
+joblib.dump(production_models, "./model/probability_model/production_models.pkl")
+
 from plotnine import (
     ggplot, aes, geom_histogram, geom_vline, annotate,
     scale_fill_manual, xlim, labs, theme_minimal, theme
