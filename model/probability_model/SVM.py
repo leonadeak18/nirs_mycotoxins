@@ -11,7 +11,7 @@ from sklearn.metrics import precision_recall_curve, roc_auc_score, accuracy_scor
 # IMPORT THE DATA
 # ==========================================
 from nirs.nirs_dataset import X_train, y_train, X_test, y_test
-from utils.preparation import binary_transform
+from utils.preparation import binary_transform_with_weight
 
 # Define the scopes
 sources = ['intact', 'ground']
@@ -24,7 +24,7 @@ for key in y_test:
 
 ## Categorize into 2 classes based on quantiles
 for source in sources:
-    y_test[source], y_train[source] = binary_transform(y_test[source]), binary_transform(y_train[source])
+    y_test[source], y_train[source] = binary_transform_with_weight(y_test[source]), binary_transform_with_weight(y_train[source])
 
 
 # ==========================================
