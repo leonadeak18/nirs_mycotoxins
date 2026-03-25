@@ -203,8 +203,9 @@ for source in sources:
             threshold_results[source][target][method]['lower'] = lower_thresholds
 
             #save the calibrated model for validation on the test set later
+            final_fitted_model = calibrated_pipeline.fit(X_tr, y_tr, calibrated_svc__sample_weight=tr_weights)
             production_models[dataset_key][method] = {
-                "model": calibrated_model.fit(X_tr, y_tr, calibrated_svc__sample_weight=tr_weights),
+                "model": final_fitted_model,
                 "lower_threshold": np.median(lower_thresholds),
                 "upper_threshold": np.median(upper_thresholds)
             }
