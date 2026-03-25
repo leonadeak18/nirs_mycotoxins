@@ -26,6 +26,7 @@ for key in y_test:
 for source in sources:
     y_test[source], y_train[source] = binary_transform(y_test[source]), binary_transform(y_train[source])
 
+
 # ==========================================
 # DEFINE THE PREPROCESSING PIPELINE
 # ==========================================
@@ -111,6 +112,10 @@ for source in sources:
         # Ensure target variables are 1D arrays
         y_tr = y_train[source][target].values
         y_te = y_test[source][target].values
+
+        #samples weight
+        tr_weights = y_train[source][target + '_weight'].values
+        te_weights = y_test[source][target + '_weight'].values
         
         for pipe_name, preprocessor in preprocessing_pipelines.items():
             # Apply Scatter Corrections / Derivatives
@@ -148,18 +153,18 @@ for source in sources:
                         n_jobs=-1,          
                         random_state=270725
                     )
-                    random_search.fit(X_tr_final, y_tr)
+                    random_search.fit(X_tr_final, y_tr, sample_weight=tr_weights)
                     
                     # 2. Extract the winning SVM and Calibrate it
                     best_svm = random_search.best_estimator_
                     best_svm.probability = True # Required for calibration
                     
-                    calibrated_svm = CalibratedClassifierCV(best_svm, cv=3)
-                    calibrated_svm.fit(X_tr_final, y_tr)
+                    calibrated_svm = CalibratedClassifierCV(best_svm, cv=10)
+                    calibrated_svm.fit(X_tr_final, y_tr, sample_weight=tr_weights)
                     
                     # 3. Test on the unseen Test Set
                     test_probs = calibrated_svm.predict_proba(X_te_final)[:, 1]
-                    test_auc = roc_auc_score(y_te, test_probs)
+                    test_auc = roc_auc_score(y_te, test_probs, sample_weight=te_weights)
                     
                     elapsed_time = time.time() - start_time
                     print(f"Done! (Test AUC: {test_auc:.3f})")
@@ -181,13 +186,14 @@ for source in sources:
                     print(f"Failed. Error: {str(e)}")
 #combine all results into a dataframe for easier analysis
 optimizied_algorithm = pd.DataFrame(experiment_results)
+optimizied_algorithm.to_csv('./results/optimized_SVM_results.csv', index=False)
 
 # ==========================================
 # ROBUST THRESHOLD FINDING FOR SVM
 # ==========================================
 all_results = []
 calibration_methods = ["sigmoid", "isotonic"]
-n_repeats = 1000
+n_repeats = 10
 target_precision = 0.95
 
 optimized_model = {
