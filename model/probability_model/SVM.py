@@ -6,6 +6,7 @@ from sklearn.svm import SVC
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import precision_recall_curve, roc_auc_score, accuracy_score, precision_score
+from sklearn.base import clone
 
 # ==========================================
 # IMPORT THE DATA
@@ -128,6 +129,12 @@ for source in sources:
     threshold_results[source] = {}
     for target in targets:
         threshold_results[source][target] = {}
+        dataset_key = f"{source}_{target}"
+        if dataset_key not in optimized_model:
+            continue
+
+        production_models[dataset_key] = {}
+        print(f"Processing: {dataset_key}")
         
         # Extract the specific data arrays for this loop iteration
         X_tr = X_train[source].values
@@ -141,30 +148,29 @@ for source in sources:
         #samples weight
         tr_weights = y_train[source][target + '_weight'].values
 
-        dataset_key = f"{source}_{target}"
-        
-        production_models[dataset_key] = {}
-
-        if dataset_key not in optimized_model:
-            continue
-        print(f"Processing: {dataset_key}")
         base_pipeline = optimized_model[dataset_key]
         pipe_name = list(base_pipeline.named_steps.keys())[0]
         fp_name = list(base_pipeline.named_steps.keys())[1]
+
+        base_svm = base_pipeline.named_steps['svc']
 
         for method in calibration_methods:
             threshold_results[source][target][method] = {}
             print(f"  -> Applying Calibration with {method} method...")
             calibrated_model = CalibratedClassifierCV(base_pipeline, cv=10, method=method)
-
+            
+            calibrated_pipeline = clone(base_pipeline)
+            calibrated_pipeline.steps[-1] = ('calibrated_svc', calibrated_model)
+            
             upper_thresholds = []
             lower_thresholds = []
 
             for i in range(n_repeats):
                 cv_strategy = StratifiedKFold(n_splits=10, shuffle=True, random_state=i)
-                cv_probs = cross_val_predict(calibrated_model, X_tr, y_tr, 
+                cv_probs = cross_val_predict(
+                    calibrated_model, X_tr, y_tr, 
                     cv=cv_strategy, method='predict_proba', n_jobs=-1,
-                    fit_params={'svc__sample_weight': tr_weights})
+                    fit_params={'calibrated_svc__sample_weight': tr_weights})
                 
                 # Calculate Upper Threshold (High Contamination)
                 prec_high, _, thresh_high = precision_recall_curve(y_tr, cv_probs[:, 1])
@@ -198,7 +204,7 @@ for source in sources:
 
             #save the calibrated model for validation on the test set later
             production_models[dataset_key][method] = {
-                "model": calibrated_model.fit(X_tr, y_tr, svc__sample_weight= tr_weights),
+                "model": calibrated_model.fit(X_tr, y_tr, calibrated_svc__sample_weight=tr_weights),
                 "lower_threshold": np.median(lower_thresholds),
                 "upper_threshold": np.median(upper_thresholds)
             }
