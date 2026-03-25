@@ -157,7 +157,7 @@ for source in sources:
         for method in calibration_methods:
             threshold_results[source][target][method] = {}
             print(f"  -> Applying Calibration with {method} method...")
-            calibrated_model = CalibratedClassifierCV(base_pipeline, cv=10, method=method)
+            calibrated_model = CalibratedClassifierCV(base_svm, cv=10, method=method)
             
             calibrated_pipeline = clone(base_pipeline)
             calibrated_pipeline.steps[-1] = ('calibrated_svc', calibrated_model)
