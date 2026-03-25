@@ -223,4 +223,4 @@ for source in sources:
                     print(f"Failed. Error: {str(e)}")
 #combine all results into a dataframe for easier analysis
 optimizied_algorithm = pd.DataFrame(wsvm_experiment_results)
-optimizied_algorithm.to_csv('./results/optimized_SVM_results.csv', index=False)
+optimizied_algorithm.to_csv('./results/weighted_SVM_results.csv', index=False)

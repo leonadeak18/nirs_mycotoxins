@@ -96,25 +96,25 @@ feature_pipelines = {
 # ROBUST THRESHOLD FINDING FOR SVM
 # ==========================================
 optimized_model = {
-    "intact_DON": Pipeline ([
-        ('1st_derivative', preprocessing_pipelines["1st_derivative"]),
-        ('ANOVA_FDR', feature_pipelines["ANOVA_FDR"]),
-        ('svc', SVC(kernel='rbf', C=500, gamma='scale', class_weight='balanced', random_state=270725, probability=True))
-        ]),
+    # "intact_DON": Pipeline ([
+    #     ('1st_derivative', preprocessing_pipelines["1st_derivative"]),
+    #     ('ANOVA_FDR', feature_pipelines["ANOVA_FDR"]),
+    #     ('svc', SVC(kernel='rbf', C=500, gamma='scale', class_weight='balanced', random_state=270725, probability=True))
+    #     ]),
     "intact_Total_DON": Pipeline([
         ('RNV_Smoothing', preprocessing_pipelines["RNV_Smoothing"]),
         ('Factor_Analysis', feature_pipelines["Factor_Analysis"]),
         ('svc', SVC(kernel='rbf', C=5, gamma=0.001, class_weight='balanced', random_state=270725, probability=True))
         ]),
-    "ground_DON": Pipeline([
+    # "ground_DON": Pipeline([
+    #     ('1st_derivative', preprocessing_pipelines["1st_derivative"]),
+    #     ('Factor_Analysis', feature_pipelines["Factor_Analysis"]),
+    #     ('svc', SVC(kernel='rbf', C=0.1, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
+    #     ]),
+    "ground_Total_DON": Pipeline([
         ('1st_derivative', preprocessing_pipelines["1st_derivative"]),
         ('Factor_Analysis', feature_pipelines["Factor_Analysis"]),
-        ('svc', SVC(kernel='rbf', C=0.1, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
-        ]),
-    "ground_Total_DON": Pipeline([
-        ('RNV_Smoothing', preprocessing_pipelines["RNV_Smoothing"]),
-        ('ANOVA_Pencentile', feature_pipelines["ANOVA_Pencentile"]),
-        ('svc', SVC(kernel='rbf', C=500, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
+        ('svc', SVC(kernel='rbf', C=1, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
         ])
 }
 
@@ -213,6 +213,57 @@ for source in sources:
 ### export the model
 import joblib
 joblib.dump(production_models, "./model/probability_model/production_models.pkl")
+
+
+import os
+# Create a folder for the outputs if it doesn't exist yet
+output_folder = "./model/probability_model/"
+os.makedirs(output_folder, exist_ok=True)
+
+#Export all results
+summary_df = pd.DataFrame(all_results)
+summary_path = os.path.join(output_folder, "threshold_summary_results.csv")
+summary_df.to_csv(summary_path, index=False)
+print(f"✨ Successfully saved summary to: {summary_path}")
+
+## Export threshold_results
+flattened_raw_data = []
+
+# Loop through the nested dictionary to unpack the lists
+for source, targets_dict in threshold_results.items():
+    for target, methods_dict in targets_dict.items():
+        for method, threshold_types in methods_dict.items():
+            
+            # Extract the raw lists
+            upper_list = threshold_types.get('upper', [])
+            lower_list = threshold_types.get('lower', [])
+            
+            # Unpack them row by row
+            for i in range(len(upper_list)):
+                flattened_raw_data.append({
+                    "Material": source,
+                    "Target": target,
+                    "Calibration_Method": method,
+                    "CV_Repeat_Number": i + 1,
+                    "Lower_Threshold": lower_list[i] if i < len(lower_list) else None,
+                    "Upper_Threshold": upper_list[i] if i < len(upper_list) else None
+                })
+
+raw_df = pd.DataFrame(flattened_raw_data)
+raw_path = os.path.join(output_folder, "raw_threshold_arrays.csv")
+raw_df.to_csv(raw_path, index=False)
+
+
+
+
+
+
+
+
+
+
+
+
 
 from plotnine import (
     ggplot, aes, geom_histogram, geom_vline, annotate,
