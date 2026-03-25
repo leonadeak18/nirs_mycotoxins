@@ -235,6 +235,9 @@ for source in sources:
         # Convert HC to 1 and LC to 0 for precision-recall calculations
         y_tr = np.where(y_tr == 'HC', 1, 0)
 
+        #samples weight
+        tr_weights = y_train[source][target + '_weight'].values
+
         dataset_key = f"{source}_{target}"
         
         production_models[dataset_key] = {}
@@ -256,7 +259,9 @@ for source in sources:
 
             for i in range(n_repeats):
                 cv_strategy = StratifiedKFold(n_splits=10, shuffle=True, random_state=i)
-                cv_probs = cross_val_predict(calibrated_model, X_tr, y_tr, cv=cv_strategy, method='predict_proba', n_jobs=-1)
+                cv_probs = cross_val_predict(calibrated_model, X_tr, y_tr, 
+                    cv=cv_strategy, method='predict_proba', n_jobs=-1,
+                    fit_params={'svc__sample_weight': tr_weights})
                 
                 # Calculate Upper Threshold (High Contamination)
                 prec_high, _, thresh_high = precision_recall_curve(y_tr, cv_probs[:, 1])
@@ -290,7 +295,7 @@ for source in sources:
 
             #save the calibrated model for validation on the test set later
             production_models[dataset_key][method] = {
-                "model": calibrated_model.fit(X_tr, y_tr),
+                "model": calibrated_model.fit(X_tr, y_tr, svc__sample_weight= tr_weights),
                 "lower_threshold": np.median(lower_thresholds),
                 "upper_threshold": np.median(upper_thresholds)
             }
