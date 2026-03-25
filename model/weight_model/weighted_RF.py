@@ -103,16 +103,17 @@ def specificity_score(y_true, y_pred, sample_weight=None):
 
 # create a scoring dictionary
 scoring_metrics = {
-    'roc_auc': make_scorer(roc_auc_score, needs_proba=True),
+    'roc_auc': make_scorer(roc_auc_score, response_method='predict_proba'),
     'accuracy': make_scorer(accuracy_score),
     'sensitivity': make_scorer(recall_score), # Sensitivity is the same as Recall
     'specificity': make_scorer(specificity_score)
 }
 
+
 # Define the grid of parameters for the Random Forest to test
 rf_param_dist = {
     'n_estimators': [50, 100, 200, 300, 400, 500, 700, 1000],
-    'max_features': ['auto', 'sqrt', 'log2'],
+    'max_features': ['sqrt', 'log2'],
     'max_depth': [None, 10, 20, 30, 40, 50],
     'min_samples_split': [2, 5, 10, 20, 50],
     'min_samples_leaf': [1, 2, 4, 10, 20]
@@ -134,6 +135,10 @@ for source in sources:
         #samples weight
         tr_weights = y_train[source][target + '_weight'].values
         te_weights = y_test[source][target + '_weight'].values
+
+        # Explicitly map 'HC' to 1 and 'LC' to 0
+        y_tr = np.where(y_train[source][target].values == 'HC', 1, 0)
+        y_te = np.where(y_test[source][target].values == 'HC', 1, 0)
         
         for pipe_name, preprocessor in preprocessing_pipelines.items():
             # Apply Scatter Corrections / Derivatives

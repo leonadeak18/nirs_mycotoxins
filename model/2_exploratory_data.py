@@ -56,21 +56,21 @@ preprocessing_pipelines = {
     "Raw": None,
     "SNV_Smoothing": Pipeline([
         ('snv', ch.StandardNormalVariate()),
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ]),
     "EMSC_Smoothing": Pipeline([
         ('emsc', ch.ExtendedMultiplicativeScatterCorrection()),
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ]),
     "1st_derivative": Pipeline([
-        ('first_derivative', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 1))
+        ('first_derivative', SavitzkyGolay(window_length=15, polyorder=2, deriv = 1))
     ]),
     "2nd_derivative": Pipeline([
-        ('second_derivative', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 2))
+        ('second_derivative', SavitzkyGolay(window_length=15, polyorder=2, deriv = 2))
     ]),
     "RNV_Smoothing": Pipeline([
         ('rnv', ch.RobustNormalVariate()),
-        ('smoothing', SavitzkyGolay(window_size=15, polynomial_order=2, derivate_order = 0))
+        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ])
 }
 
@@ -115,6 +115,64 @@ for material in spectra_plot.keys():
     grid_spectra[material].save(f"./figures/preprocessing/all_spectra_grid_{material}.svg", dpi=600)
 print("All grid plots saved successfully.")
 
+
+## Plotting the spectra with the country as color
+country = pd.read_csv('./nirs/location.csv', index_col=0)
+country['country'] = country['country'].astype('category')
+country['year'] = country['year'].astype('category')
+
+### create a long format dataframe for plotting with the country as color
+from plotnine import theme
+
+# Format the data and merge targets
+formatted_train_with_country = {}
+for material, preps in X_train_processed.items():
+    formatted_train_with_country[material] = {
+        prep_name: format_spectra(data, material).merge(country, left_on='Sample_ID', right_index=True)
+        for prep_name, data in preps.items()
+    }
+
+# Plot and save grids for both targets in one go
+spectra_plots_country = {}
+for material, preps in formatted_train_with_country.items():
+    spectra_plots_country[material] = {}
+    
+    # A. Generate individual plots
+    for prep_name, df in preps.items():
+        print(f"Plotting {material} - {prep_name} with {target} target variable")
+        spectra_plots_country[material][prep_name] = plot_spectra(
+            df, 
+            title=f"{prep_name}", 
+            color_var='country'
+        )
+    
+    # B. Assemble and save the grid for this material & target
+    p = spectra_plots_country[material]
+    grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+            (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
+    
+    grid = grid + theme(figure_size=(24, 10))
+    grid.save(f"./figures/preprocessing/country_all_spectra_grid_{material}.svg", dpi=600)
+
+spectra_plots_year = {}
+for material, preps in formatted_train_with_country.items():
+    spectra_plots_year[material] = {}
+    
+    # A. Generate individual plots
+    for prep_name, df in preps.items():
+        print(f"Plotting {material} - {prep_name} with year as color")
+        spectra_plots_year[material][prep_name] = plot_spectra(
+            df, 
+            title=f"{prep_name}", 
+            color_var='year'
+        ) + theme(legend_position="right")
+    
+    # B. Assemble and save the grid for this material & target
+    p = spectra_plots_year[material]
+    grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+            (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
+    grid = grid + theme(figure_size=(24, 10))
+    grid.save(f"./figures/preprocessing/year_all_spectra_grid_{material}.svg", dpi=600)
 
 ## Plotting the spectra with the target variable as color
 ### create a long format dataframe for plotting with the target variable as color
@@ -268,11 +326,13 @@ from sklearn.preprocessing import StandardScaler
 pca_df = {}
 pca_df2 = {}
 pca_df3 = {}
+pca_country = {}
 pca_df_variance_explained = {}
 for material in X_train_processed.keys():
     pca_df[material] = {}
     pca_df2[material] = {}
     pca_df3[material] = {}
+    pca_country[material] = {}
     pca_df_variance_explained[material] = {}
     for prep_name in X_train_processed[material].keys():
         print(f"Performing PCA for {material} - {prep_name}")
@@ -287,6 +347,7 @@ for material in X_train_processed.keys():
         pca_df[material][prep_name] = pd.DataFrame(X_pca, columns=['PC1', 'PC2', 'PC3', 'PC4'], index=X_train_processed[material][prep_name].index)
         pca_df2[material][prep_name] = pca_df[material][prep_name].merge(y_train2[material], left_index=True, right_index=True)
         pca_df3[material][prep_name] = pca_df[material][prep_name].merge(y_train3[material], left_index=True, right_index=True)
+        pca_country[material][prep_name] = pca_df[material][prep_name].merge(country, left_index=True, right_index=True)
 
 from utils.plotting import plot_pca
 pca_plots = {}
@@ -317,3 +378,32 @@ for target in targets:
                (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
         grid = grid + theme(figure_size=(24, 10))
         grid.save(f"./figures/PCA/pca_grid_{material}_{target}_3_category.svg", dpi=600)
+
+#plotting based on country
+pca_country_plot = {}
+for material in pca_country.keys():
+    pca_country_plot[material] = {}
+    for prep_name, df in pca_country[material].items():
+        print(f"Plotting PCA for {material} - {prep_name} with country categorization")
+        pca_country_plot[material][prep_name] = plot_pca(df, variance_explained=pca_df_variance_explained[material][prep_name], title=f"PCA of {prep_name} with country categorization", color_var='country')
+    
+    #assemble and save the grid for this material & target
+    p = pca_country_plot[material]
+    grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+            (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
+    grid = grid + theme(figure_size=(24, 10))
+    grid.save(f"./figures/PCA/country_pca_grid_{material}_category.svg", dpi=600)
+
+pca_year = {}
+for material in pca_country.keys():
+    pca_year[material] = {}
+    for prep_name, df in pca_country[material].items():
+        print(f"Plotting PCA for {material} - {prep_name} with year categorization")
+        pca_year[material][prep_name] = plot_pca(df, variance_explained=pca_df_variance_explained[material][prep_name], title=f"PCA of {prep_name} with year categorization", color_var='year') + theme(legend_position="right")
+    
+    #assemble and save the grid for this material & target
+    p = pca_year[material]
+    grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+            (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
+    grid = grid + theme(figure_size=(24, 10))
+    grid.save(f"./figures/PCA/year_pca_grid_{material}_category.svg", dpi=600)

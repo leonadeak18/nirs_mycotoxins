@@ -124,6 +124,10 @@ for source in sources:
         # Ensure target variables are 1D arrays
         y_tr = y_train[source][target].values
         y_te = y_test[source][target].values
+
+        # Explicitly map 'HC' to 1 and 'LC' to 0
+        y_tr = np.where(y_train[source][target].values == 'HC', 1, 0)
+        y_te = np.where(y_test[source][target].values == 'HC', 1, 0)
         
         for pipe_name, preprocessor in preprocessing_pipelines.items():
             # Apply Scatter Corrections / Derivatives

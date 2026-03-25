@@ -193,24 +193,24 @@ optimizied_algorithm.to_csv('./results/optimized_SVM_results.csv', index=False)
 # ==========================================
 optimized_model = {
     "intact_DON": Pipeline ([
-        ('RNV_Smoothing', preprocessing_pipelines["RNV_Smoothing"]),
-        ('Factor_Analysis', feature_pipelines["Factor_Analysis"]),
-        ('svc', SVC(kernel='rbf', C=10, gamma=0.001, class_weight='balanced', random_state=270725, probability=True))
+        ('1st_derivative', preprocessing_pipelines["1st_derivative"]),
+        ('ANOVA_FDR', feature_pipelines["ANOVA_FDR"]),
+        ('svc', SVC(kernel='rbf', C=500, gamma='scale', class_weight='balanced', random_state=270725, probability=True))
         ]),
     "intact_Total_DON": Pipeline([
         ('RNV_Smoothing', preprocessing_pipelines["RNV_Smoothing"]),
         ('Factor_Analysis', feature_pipelines["Factor_Analysis"]),
-        ('svc', SVC(kernel='rbf', C=5, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
+        ('svc', SVC(kernel='rbf', C=5, gamma=0.001, class_weight='balanced', random_state=270725, probability=True))
         ]),
     "ground_DON": Pipeline([
-        ('RNV_Smoothing', preprocessing_pipelines["RNV_Smoothing"]),
-        ('RFE', feature_pipelines["RFE"]),
-        ('svc', SVC(kernel='rbf', C=1000, gamma='auto', class_weight='balanced', random_state=270725, probability=True))
+        ('1st_derivative', preprocessing_pipelines["1st_derivative"]),
+        ('Factor_Analysis', feature_pipelines["Factor_Analysis"]),
+        ('svc', SVC(kernel='rbf', C=0.1, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
         ]),
     "ground_Total_DON": Pipeline([
-        ('SNV_Smoothing', preprocessing_pipelines["SNV_Smoothing"]),
-        ('PCA', feature_pipelines["PCA"]),
-        ('svc', SVC(kernel='rbf', C=1000, gamma=0.001, class_weight='balanced', random_state=270725, probability=True))
+        ('RNV_Smoothing', preprocessing_pipelines["RNV_Smoothing"]),
+        ('ANOVA_Pencentile', feature_pipelines["ANOVA_Pencentile"]),
+        ('svc', SVC(kernel='rbf', C=500, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
         ])
 }
 
@@ -294,9 +294,6 @@ for source in sources:
                 "lower_threshold": np.median(lower_thresholds),
                 "upper_threshold": np.median(upper_thresholds)
             }
-
-# Combine all results into a single DataFrame
-threshold_results = pd.DataFrame(all_results)
 
 ## Export all important results
 ### export the model
