@@ -12,7 +12,7 @@ from sklearn.base import clone
 # IMPORT THE DATA
 # ==========================================
 from nirs.nirs_dataset import X_train, y_train, X_test, y_test
-from utils.preparation import binary_transform
+from utils.preparation import binary_transform_with_weight
 
 # Define the scopes
 sources = ['intact', 'ground']
@@ -25,7 +25,7 @@ for key in y_test:
 
 ## Categorize into 2 classes based on quantiles
 for source in sources:
-    y_test[source], y_train[source] = binary_transform(y_test[source]), binary_transform(y_train[source])
+    y_test[source], y_train[source] = binary_transform_with_weight(y_test[source]), binary_transform_with_weight(y_train[source])
 
 
 # ==========================================
@@ -102,9 +102,9 @@ optimized_model = {
     #     ('svc', SVC(kernel='rbf', C=500, gamma='scale', class_weight='balanced', random_state=270725, probability=True))
     #     ]),
     "intact_Total_DON": Pipeline([
-        ('RNV_Smoothing', preprocessing_pipelines["RNV_Smoothing"]),
-        ('Factor_Analysis', feature_pipelines["Factor_Analysis"]),
-        ('svc', SVC(kernel='rbf', C=5, gamma=0.001, class_weight='balanced', random_state=270725, probability=True))
+        ('2nd_derivative', preprocessing_pipelines["2nd_derivative"]),
+        ('ANOVA_FDR', feature_pipelines["ANOVA_FDR"]),
+        ('svc', SVC(kernel='rbf', C=100, gamma='scale', class_weight='balanced', random_state=270725, probability=True))
         ]),
     # "ground_DON": Pipeline([
     #     ('1st_derivative', preprocessing_pipelines["1st_derivative"]),
@@ -112,9 +112,9 @@ optimized_model = {
     #     ('svc', SVC(kernel='rbf', C=0.1, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
     #     ]),
     "ground_Total_DON": Pipeline([
-        ('1st_derivative', preprocessing_pipelines["1st_derivative"]),
-        ('Factor_Analysis', feature_pipelines["Factor_Analysis"]),
-        ('svc', SVC(kernel='rbf', C=1, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
+        ('SNV_Smoothing', preprocessing_pipelines["SNV_Smoothing"]),
+        ('ANOVA_FDR', feature_pipelines["ANOVA_FDR"]),
+        ('svc', SVC(kernel='rbf', C=1000, gamma=0.01, class_weight='balanced', random_state=270725, probability=True))
         ])
 }
 
@@ -213,7 +213,7 @@ for source in sources:
 ## Export all important results
 ### export the model
 import joblib
-joblib.dump(production_models, "./model/probability_model/production_models.pkl")
+joblib.dump(production_models, "./model/probability_model/svm_models.pkl")
 
 
 import os
