@@ -1,3 +1,4 @@
+from model.probability_model.SVM import cv_strategy
 import pandas as pd
 import numpy as np
 import time
@@ -5,7 +6,8 @@ from sklearn.model_selection import cross_val_predict, StratifiedKFold, Randomiz
 from sklearn.svm import SVC
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import (roc_auc_score, accuracy_score, recall_score, confusion_matrix, make_scorer)
+from sklearn.metrics import (roc_auc_score, accuracy_score, recall_score, confusion_matrix, make_scorer, roc_curve)
+
 
 # ==========================================
 # IMPORT THE DATA
@@ -81,8 +83,8 @@ feature_pipelines = {
         ('ANOVA_FDR', SelectFdr(score_func=f_classif, alpha=0.05))
     ]),
     "Lasso L1 (Selector)": Pipeline([
-        # C=0.1 applies strong regularization to drop many features
-        ('Lasso_L1', SelectFromModel(LogisticRegression(penalty='l1', solver='liblinear', C=0.1, random_state=270725)))
+        # C=1 applies moderate regularization to drop some features
+        ('Lasso_L1', SelectFromModel(LogisticRegression(penalty='l1', solver='liblinear', C=1, random_state=270725)))
     ]),
     
     "RFE": Pipeline([
@@ -108,8 +110,10 @@ scoring_metrics = {
 }
 wsvm_experiment_results = []
 # Define the grid of parameters for the SVM to test
+wsvm_experiment_results = []
+# Define the grid of parameters for the SVM to test
 svm_param_dist = {
-    'C': [0.1, 1, 5, 10, 50, 100, 500, 1000],
+    'C': [0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000],
     'gamma': ['scale', 'auto', 0.001, 0.01, 0.1, 1]
 }
 
@@ -121,15 +125,11 @@ for source in sources:
         X_tr = X_train[source].values
         X_te = X_test[source].values
         
-        # Ensure target variables are 1D arrays
-        y_tr = y_train[source][target].values
-        y_te = y_test[source][target].values
-        
-        # Explicitly map 'HC' to 1 and 'LC' to 0
+        # Ensure target variables are 1D arrays and map 'HC' to 1 and 'LC' to 0
         y_tr = np.where(y_train[source][target].values == 'HC', 1, 0)
         y_te = np.where(y_test[source][target].values == 'HC', 1, 0)
 
-        #samples weight
+        # Extract sample weights
         tr_weights = y_train[source][target + '_weight'].values
         te_weights = y_test[source][target + '_weight'].values
         
@@ -142,8 +142,8 @@ for source in sources:
                 print(f"Running -> Prep: {pipe_name} | Feature: {fp_name}...", end=" ")
                 start_time = time.time()
                 
-                # Apply Feature Extraction / Selection
                 try:
+                    # Apply Feature Extraction / Selection
                     if fp_method is not None:
                         X_tr_final = fp_method.fit_transform(X_train_prep, y_tr)
                         X_te_final = fp_method.transform(X_test_prep)
@@ -151,7 +151,7 @@ for source in sources:
                         X_tr_final = X_train_prep
                         X_te_final = X_test_prep
                         
-                    # Skip if a selector dropped ALL features (happens rarely with Lasso/FDR)
+                    # Skip if a selector dropped ALL features
                     if X_tr_final.shape[1] == 0:
                         print("Skipped (0 features selected).")
                         continue
@@ -166,41 +166,58 @@ for source in sources:
                         n_iter=50,          
                         cv=10,
                         scoring=scoring_metrics,
-                        refit = 'roc_auc',
+                        refit='roc_auc',
                         n_jobs=-1,          
                         random_state=270725
                     )
                     random_search.fit(X_tr_final, y_tr, sample_weight=tr_weights)
                     
-                    # Extract the winning SVM and Calibrate it
+                    # Extract the winning SVM from the search and wrap in calibrator
                     best_svm = random_search.best_estimator_
-                    best_svm.probability = True # Required for calibration
-
-                    # Extract CV metrics for the best model
-                    best_idx = random_search.best_index_
-                    cv_auc = random_search.cv_results_['mean_test_roc_auc'][best_idx]
-                    cv_accuracy = random_search.cv_results_['mean_test_accuracy'][best_idx]
-                    cv_sensitivity = random_search.cv_results_['mean_test_sensitivity'][best_idx]
-                    cv_specificity = random_search.cv_results_['mean_test_specificity'][best_idx]
-
+                    best_svm.probability = True 
+                    calibrated_svm = CalibratedClassifierCV(best_svm, cv=10, method='sigmoid')
                     
-                    calibrated_svm = CalibratedClassifierCV(best_svm, cv=10)
+                    # Get true, out-of-fold calibrated probabilities for the training set
+                    cv_strategy = StratifiedKFold(n_splits=10, shuffle=True, random_state=270725)
+                    calibrated_cv_probs = cross_val_predict(
+                        calibrated_svm, X_tr_final, y_tr, 
+                        cv=cv_strategy, method='predict_proba', n_jobs=-1,
+                        params={'sample_weight': tr_weights} 
+                    )
+                    
+                    # Find the optimal threshold using Youden's J
+                    fpr, tpr, thresholds = roc_curve(y_tr, calibrated_cv_probs[:, 1], sample_weight=tr_weights)
+                    best_idx = np.argmax(tpr - fpr)
+                    optimal_threshold = thresholds[best_idx]
+                    
+                    # Convert probabilities to hard predictions using your optimized threshold
+                    calibrated_cv_preds = (calibrated_cv_probs[:, 1] >= optimal_threshold).astype(int)
+                    
+                    # Calculate true CV metrics
+                    true_cv_auc = roc_auc_score(y_tr, calibrated_cv_probs[:, 1], sample_weight=tr_weights)
+                    true_cv_accuracy = accuracy_score(y_tr, calibrated_cv_preds, sample_weight=tr_weights)
+                    true_cv_sensitivity = recall_score(y_tr, calibrated_cv_preds, sample_weight=tr_weights)
+                    true_cv_specificity = recall_score(y_tr, calibrated_cv_preds, pos_label=0, sample_weight=tr_weights)
+                    
+                    # 6. Fit the calibrator on the FULL training set for final testing
                     calibrated_svm.fit(X_tr_final, y_tr, sample_weight=tr_weights)
                     
-                    # Test on the Test Set
+                    # 7. Test on the Test Set
                     test_probs = calibrated_svm.predict_proba(X_te_final)[:, 1]
-                    test_preds = calibrated_svm.predict(X_te_final)
+                    
+                    # 8. Apply your optimal threshold to the test set predictions
+                    test_preds = (test_probs >= optimal_threshold).astype(int)
 
-                    # extract test metrics
+                    # 9. Extract accurate test metrics
                     test_auc = roc_auc_score(y_te, test_probs, sample_weight=te_weights)
                     test_accuracy = accuracy_score(y_te, test_preds, sample_weight=te_weights)
                     test_sensitivity = recall_score(y_te, test_preds, sample_weight=te_weights)
-                    test_specificity = specificity_score(y_te, test_preds, sample_weight=te_weights)
+                    test_specificity = recall_score(y_te, test_preds, pos_label=0, sample_weight=te_weights)
                     
                     elapsed_time = time.time() - start_time
-                    print(f"Done! (Test AUC: {test_auc:.3f})")
+                    print(f"Done! (Test AUC: {test_auc:.3f} | True CV Acc: {true_cv_accuracy:.3f})")
                     
-                    # 4. Save the results
+                    # 10. Save the aligned results!
                     wsvm_experiment_results.append({
                         'Sample_Source': source,
                         'Target_Toxin': target,
@@ -208,10 +225,11 @@ for source in sources:
                         'Feature_Method': fp_name,
                         'Best_C': random_search.best_params_['C'],
                         'Best_Gamma': random_search.best_params_['gamma'],
-                        'CV_Val_AUC': cv_auc,
-                        'CV_Val_Accuracy': cv_accuracy,
-                        'CV_Val_Sensitivity': cv_sensitivity,
-                        'CV_Val_Specificity': cv_specificity,
+                        'Optimal_Threshold': optimal_threshold,
+                        'True_CV_AUC': true_cv_auc,
+                        'True_CV_Accuracy': true_cv_accuracy,
+                        'True_CV_Sensitivity': true_cv_sensitivity,
+                        'True_CV_Specificity': true_cv_specificity,
                         'Test_AUC': test_auc,
                         'Test_Accuracy': test_accuracy,
                         'Test_Sensitivity': test_sensitivity,

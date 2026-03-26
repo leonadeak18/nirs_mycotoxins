@@ -1,4 +1,3 @@
-from utils.preparation import binary_transform_with_weight
 import pandas as pd
 import numpy as np
 import time
@@ -13,7 +12,7 @@ from sklearn.metrics import (roc_auc_score, accuracy_score, recall_score, confus
 # IMPORT THE DATA
 # ==========================================
 from nirs.nirs_dataset import X_train, y_train, X_test, y_test
-from utils.preparation import binary_transform
+from utils.preparation import binary_transform_with_weight
 
 # Define the scopes
 sources = ['intact', 'ground']
