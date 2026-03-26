@@ -1,4 +1,3 @@
-from model.probability_model.SVM import cv_strategy
 import pandas as pd
 import numpy as np
 import time
@@ -110,8 +109,7 @@ scoring_metrics = {
 }
 wsvm_experiment_results = []
 # Define the grid of parameters for the SVM to test
-wsvm_experiment_results = []
-# Define the grid of parameters for the SVM to test
+
 svm_param_dist = {
     'C': [0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000],
     'gamma': ['scale', 'auto', 0.001, 0.01, 0.1, 1]
