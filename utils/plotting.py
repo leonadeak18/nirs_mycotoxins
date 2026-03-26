@@ -78,3 +78,82 @@ def plot_pca(pca_df, variance_explained, title, color_var):
         output = base_plot + scale_color_cmap_d(cmap_name="viridis_r") + theme(legend_position = "none")
 
     return output
+
+## Distribution of CV Probability Thresholds
+def plot_threshold_distribution(df, title):
+    # create a long format dataframe for plotting
+    long_df = df.melt(id_vars=['Material', 'Target', 'Calibration_Method'], value_vars=['Lower_Threshold', 'Upper_Threshold'], var_name='Type', value_name='Threshold')
+    optimal_lower_thresh = long_df[long_df['Type'] == 'Lower_Threshold']['Threshold'].median()
+    optimal_upper_thresh = long_df[long_df['Type'] == 'Upper_Threshold']['Threshold'].median()
+    output = (
+        ggplot(long_df, aes(x='Threshold', fill='Type')) +
+        # Background for uncertainty
+        annotate('rect',
+            xmin=optimal_lower_thresh, xmax=optimal_upper_thresh, ymin=0, ymax=float('inf'), fill='lightgray', alpha=0.4
+        ) +
+        # Safe area
+        annotate(
+            'rect', 
+            xmin=0, xmax=optimal_lower_thresh, ymin=0, ymax=float('inf'), fill='#3772ff', alpha=0.4
+        ) +
+        # Unsafe area
+        annotate(
+            'rect',
+            xmin=optimal_upper_thresh, xmax=1, ymin=0, ymax=float('inf'), fill='#df2935', alpha=0.4
+        ) +
+        geom_density(alpha=0.6, color='none') + 
+        scale_fill_manual(
+            values={'Lower_Threshold': '#3772ff', 'Upper_Threshold': '#df2935'},
+            labels=['Lower Threshold', 'Upper Threshold'] 
+        ) +
+        labs(
+            title=title,
+            x='Probability', 
+            y='Density',
+            fill=''
+        ) +
+        coord_cartesian(xlim=(0, 1)) +
+        geom_vline(xintercept=optimal_lower_thresh, color='darkblue', linetype='dashed', size=0.8) +
+        geom_vline(xintercept=optimal_upper_thresh, color='darkred', linetype='dashed', size=0.8) +
+        
+        # Text annotation of uncertainty zone
+        annotate(
+            'text', 
+            x=(optimal_lower_thresh + optimal_upper_thresh) / 2, 
+            y=20,
+            label='Uncertain Zone\n(Needs Further Testing)',
+            color='#555555', 
+            size=10
+        ) +
+
+        # Text annotations for the thresholds
+        annotate(
+            'text', 
+            x=optimal_lower_thresh/2, 
+            y=20, 
+            label="True Negative Rate of 95%", 
+            color='darkblue', 
+            angle=90, 
+            size=8
+        ) +
+        annotate(
+            'text',
+            x=(optimal_upper_thresh + 1) / 2 + 0.02,
+            y=20,
+            label="True Positive Rate of 95%",
+            color='darkred',
+            angle=90,
+            size=8
+        ) +
+        
+        # Theme
+        theme_matplotlib() + 
+        theme(
+            legend_position='bottom',
+            plot_title=element_text(size=12),
+            panel_grid_minor=element_blank()
+        )
+    )
+
+    return output
+

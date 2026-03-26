@@ -12,7 +12,7 @@ from sklearn.base import clone
 # IMPORT THE DATA
 # ==========================================
 from nirs.nirs_dataset import X_train, y_train, X_test, y_test
-from utils.preparation import binary_transform_with_weight
+from utils.preparation import binary_transform
 
 # Define the scopes
 sources = ['intact', 'ground']
@@ -25,7 +25,7 @@ for key in y_test:
 
 ## Categorize into 2 classes based on quantiles
 for source in sources:
-    y_test[source], y_train[source] = binary_transform_with_weight(y_test[source]), binary_transform_with_weight(y_train[source])
+    y_test[source], y_train[source] = binary_transform(y_test[source]), binary_transform(y_train[source])
 
 
 # ==========================================
@@ -261,81 +261,56 @@ raw_df.to_csv(raw_path, index=False)
 
 
 
+# ==========================================
+# PLOTTING THE DISTRIBUTIONS OF THRESHOLDS
+# ==========================================
+from utils.plotting import plot_threshold_distribution
+df = pd.read_csv("./model/probability_model/raw_threshold_arrays.csv")
+plot_df = df[(df['Material'] == 'intact') & (df['Target'] == 'Total_DON') & (df['Calibration_Method'] == 'sigmoid')]
+plot = plot_threshold_distribution(plot_df, title="Distribution of CV Probability Thresholds for Intact Total DON (Sigmoid Calibration)")
+plot.show()
 
 
 
-
-
-from plotnine import (
-    ggplot, aes, geom_histogram, geom_vline, annotate,
-    scale_fill_manual, xlim, labs, theme_minimal, theme
-)
-
-def plot_threshold_distributions(lower_thresholds, upper_thresholds, optimal_lower_thresh, optimal_upper_thresh, n_repeats):
-    """
-    Visualizes the distribution of CV probability thresholds using plotnine.
-    """
-    
-    # 1. Prepare the data (plotnine requires a "long" format DataFrame)
-    df_lower = pd.DataFrame({'Threshold': lower_thresholds, 'Type': 'Lower (Low Contam)'})
-    df_upper = pd.DataFrame({'Threshold': upper_thresholds, 'Type': 'Upper (High Contam)'})
-    
-    # Combine them into one clean dataset
-    plot_df = pd.concat([df_lower, df_upper], ignore_index=True)
-    
-    # 2. Build the plotnine figure
-    p = (
-        ggplot(plot_df, aes(x='Threshold', fill='Type'))
-        
-        # Shade the "Uncertain" area first so it stays in the background
-        + annotate(
-            "rect", 
-            xmin=optimal_lower_thresh, xmax=optimal_upper_thresh, 
-            ymin=0, ymax=np.inf, # np.inf automatically fills to the top of the chart!
-            fill="gray", alpha=0.2
-        )
-        
-        # Plot the histograms
-        # position="identity" ensures they overlap rather than stacking on top of each other
-        + geom_histogram(bins=2, alpha=0.6, position="identity", color="white")
-        
-        # Add the vertical dashed lines for the medians
-        + geom_vline(xintercept=optimal_lower_thresh, color='darkblue', linetype='dashed', size=1)
-        + geom_vline(xintercept=optimal_upper_thresh, color='darkred', linetype='dashed', size=1)
-        
-        # Add text annotations right next to the lines to show the exact values
-        + annotate("text", x=optimal_lower_thresh - 0.02, y=10, label=f"{optimal_lower_thresh:.3f}", color="darkblue", angle=90)
-        + annotate("text", x=optimal_upper_thresh + 0.02, y=10, label=f"{optimal_upper_thresh:.3f}", color="darkred", angle=90)
-        
-        # Set colors and limits
-        + scale_fill_manual(values={'Lower (Low Contam)': 'blue', 'Upper (High Contam)': 'red'})
-        + xlim(0, 1)
-        
-        # Add beautiful labels
-        + labs(
-            title=f'Distribution of 95% Precision Thresholds over {n_repeats} CV Repeats',
-            x='Probability Score',
-            y='Frequency',
-            fill='Threshold Type'
-        )
-        
-        # Apply a clean, modern theme
-        + theme_minimal()
-        + theme(
-            legend_position='top',
-            figure_size=(10, 6)
-        )
-    )
-    
-    return p
-
-my_plot = plot_threshold_distributions(lower_thresholds, upper_thresholds, np.median(lower_thresholds), np.median(upper_thresholds), n_repeats)
-my_plot.show()
 
 
 # ==========================================
 # VERIFICATION ON TEST SET
 # ==========================================
+import joblib
+import numpy as np
+
+# Load the models
+production_models = joblib.load("./model/probability_model/production_models.pkl")
+registry_entry = production_models['ground_Total_DON']["isotonic"]
+
+# This 'model' is your FULL fitted pipeline
+model = registry_entry["model"] 
+lower_t = registry_entry["lower_threshold"]
+upper_t = registry_entry["upper_threshold"]
+
+# 1. Get the RAW test data
+X_te_raw = X_test['ground'].values
+
+# Set up your target variables
+y_te_binary = np.where(y_test['ground']['Total_DON'].values == 'HC', 1, 0)
+y_te_strings = np.where(y_te_binary == 1, 'HC', 'LC')
+
+# 2. Pass the RAW data directly into the pipeline
+# The pipeline will automatically apply RNV_Smoothing and Factor_Analysis for you
+probs = model.predict_proba(X_te_raw)[:, 1]
+
+predictions = np.full(probs.shape, 'UC', dtype=object)
+predictions[probs < lower_t] = 'LC'
+predictions[probs > upper_t] = 'HC'
+
+# 4. Filter for Confident Predictions
+eval_df = pd.DataFrame({'True_Label': y_test['ground']['Total_DON'].values, 'Prediction': predictions}, index=X_test['ground'].index)
+confident_df = eval_df[eval_df['Prediction'] != 'UC']
+
+uncertain_count = len(eval_df) - len(confident_df)
+coverage_pct = (len(confident_df) / len(eval_df)) * 100
+
 validation_summary = []
 
 for source in sources:

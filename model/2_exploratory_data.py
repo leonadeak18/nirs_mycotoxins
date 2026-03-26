@@ -32,22 +32,14 @@ for key in y_train:
     #remove Total_DON and Log_Total_DON columns from y_train
     y_train[key] = y_train[key].drop(columns=['Log_DON', 'Log_Total_DON'])
 
-## Categorize DON into 2 classes
-def categorize_targets(y):
-    bins = [-float('inf'), 1000, float('inf')]
-    labels = ['LC', 'HC']
-    
-    y_class = pd.DataFrame(index=y.index)
-    
-    for target in targets:
-        y_class[target] = pd.cut(y[target], bins=bins, labels=labels)
-    
-    return y_class
 
+
+from utils.preparation import binary_transform, three_level_transform
+# categorize into two classes: Low Contamination (LC) and High Contamination (HC)
 y_train2, y_test2 = {}, {}
 for source in sources:
-    y_train2[source] = categorize_targets(y_train[source][['DON', 'Total_DON']])
-    y_test2[source] = categorize_targets(y_test[source][['DON', 'Total_DON']])
+    y_train2[source] = binary_transform(y_train[source][['DON', 'Total_DON']])
+    y_test2[source] = binary_transform(y_test[source][['DON', 'Total_DON']])
 
 #Preprocessing pipelines
 import chemotools.scatter as ch
@@ -215,21 +207,10 @@ spectra_plots['DON']['intact']['SNV_Smoothing'].show()
 
 
 ## Categorize DON into 3 classes based on quantiles
-def categorize_targets3(y):
-    bins = [-float('inf'), 500, 1500, float('inf')]
-    labels = ['LC', 'UC', 'HC']
-    
-    y_class = pd.DataFrame(index=y.index)
-    
-    for target in targets:
-        y_class[target] = pd.cut(y[target], bins=bins, labels=labels)
-    
-    return y_class
-
 y_train3, y_test3 = {}, {}
 for source in sources:
-    y_train3[source] = categorize_targets3(y_train[source][['DON', 'Total_DON']])
-    y_test3[source] = categorize_targets3(y_test[source][['DON', 'Total_DON']])
+    y_train3[source] = three_level_transform(y_train[source][['DON', 'Total_DON']])
+    y_test3[source] = three_level_transform(y_test[source][['DON', 'Total_DON']])
 
 # Format the data and merge targets
 formatted_train_with_target3 = {}
@@ -291,6 +272,33 @@ bar_plot = (
 )
 bar_plot.save("./figures/preprocessing/target_distribution_bar_plot.svg", dpi=600)
 
+## barchart for the test set
+target_distribution_test = {}
+for source in sources:
+    target_distribution_test[source] = {}
+    for target in targets:
+        target_distribution_test[source][target] = y_test2[source][target].value_counts().reset_index()
+        target_distribution_test[source][target].columns = ['Category', 'Count']
+        target_distribution_test[source][target]['Source'] = source
+        target_distribution_test[source][target]['Target'] = target
+target_distribution_test_df = pd.concat([df for source in target_distribution_test.values() for df in source.values()], ignore_index=True)
+
+bar_plot_test = (
+    ggplot(target_distribution_test_df, aes(x='Source', y='Count', fill='Category')) +
+    geom_bar(stat='identity', position='dodge') +
+    facet_wrap('~Target') +
+    labs(title='Distribution of Categorized Target Variables (Test Set)', x='Source', y='Count') +
+    theme_classic() +
+    scale_y_continuous(limits=(0, 70)) +
+    scale_fill_manual(values=['#70c8e2', '#e54b2c']) +
+    theme(
+        title=element_text(size=12),
+        axis_title=element_text(size=10),
+        legend_position="right"
+    )
+)
+bar_plot_test.save("./figures/preprocessing/target_distribution_bar_plot_test.svg", dpi=600)
+
 ### Bar chart for 3-category distribution
 target_distribution3 = {}
 for source in sources:
@@ -318,6 +326,34 @@ bar_plot3 = (
 )
 bar_plot3.save("./figures/preprocessing/target_distribution_bar_plot3.svg", dpi=600)
 
+
+### Bar chart for 3-category distribution for test set
+from plotnine import *
+target_distribution3_test = {}
+for source in sources:
+    target_distribution3_test[source] = {}
+    for target in targets:
+        target_distribution3_test[source][target] = y_test3[source][target].value_counts().reset_index()
+        target_distribution3_test[source][target].columns = ['Category', 'Count']
+        target_distribution3_test[source][target]['Source'] = source
+        target_distribution3_test[source][target]['Target'] = target
+target_distribution3_test_df = pd.concat([df for source in target_distribution3_test.values() for df in source.values()], ignore_index=True)
+
+bar_plot3_test = (
+    ggplot(target_distribution3_test_df, aes(x='Source', y='Count', fill='Category')) +
+    geom_bar(stat='identity', position='dodge') +
+    facet_wrap('~Target') +
+    labs(title='Distribution of 3-Category Target Variables (Test Set)', x='Source', y='Count') +
+    theme_classic() +
+    scale_y_continuous(limits=(0, 50)) +
+    scale_fill_manual(values=['#70c8e2', 'black', '#e54b2c']) +
+    theme(
+        title=element_text(size=12),
+        axis_title=element_text(size=10),
+        legend_position="right"
+    )
+)
+bar_plot3_test.save("./figures/preprocessing/target_distribution_bar_plot3_test.svg", dpi=600)
 
 ######## PCA analysis of the train spectra ############
 from sklearn.decomposition import PCA
