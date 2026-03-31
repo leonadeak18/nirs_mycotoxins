@@ -52,8 +52,8 @@ for source in sources:
             te_weights = y_test_weighted_binary[source][i][target + '_weight'].values
             
             # Extract country text and reshape for the encoder
-            country_tr_raw = train_country[source][i].values.reshape(-1, 1)
-            country_te_raw = test_country[source][i].values.reshape(-1, 1)
+            country_tr_raw = train_country[source][i].to_numpy().reshape(-1, 1)
+            country_te_raw = test_country[source][i].to_numpy().reshape(-1, 1)
             
             # Convert text (Austria/France) to numbers (0/1)
             country_tr_encoded = country_encoder.fit_transform(country_tr_raw)
