@@ -1,0 +1,174 @@
+# ========================================================
+# IMPORT STATIC CONFIGURATIONS AND DATA LOADING FUNCTION
+# ========================================================
+import pandas as pd
+import numpy as np
+import time
+from sklearn.preprocessing import OrdinalEncoder
+from sklearn.metrics import (roc_auc_score, accuracy_score, recall_score, roc_curve)
+from sklearn.model_selection import cross_val_predict, RandomizedSearchCV, StratifiedKFold
+from sklearn.calibration import CalibratedClassifierCV
+from model.pipeline_config import (preprocessing_pipelines, feature_pipelines, scoring_metrics, load_nirs_data)
+from sklearn.cross_decomposition import PLSRegression
+
+#import the data
+X_train, X_test, y_train_binary, y_test_binary, train_country, test_country = load_nirs_data(splits=10, threshold=1000, weighted=False)
+
+# define the sources and targets for iteration
+sources = ['intact', 'ground']
+targets = ['DON', 'Total_DON']
+
+
+
+# ==========================================
+# PLS-DA MODEL OPTIMIZATION
+# ==========================================
+# Define the grid of parameters for PLS-DA to test
+plsda_param_dist = {
+    'n_components': list(range(2, 21))  # Test 2 to 20 latent variables
+}
+
+# Initialize the encoder for the countries
+country_encoder = OrdinalEncoder()
+plsda_experiment_results = []
+
+for source in sources:
+    for target in targets:
+        for i in range(10):
+            print(f"Evaluating: {source} samples for {target} (Split {i})")
+
+            # Extract the specific data arrays for this specific split
+            X_tr_spectra = X_train[source][i].values
+            X_te_spectra = X_test[source][i].values
+
+            # Explicitly map 'HC' to 1 and 'LC' to 0
+            y_tr = np.where(y_train_binary[source][i][target].values == 'HC', 1, 0)
+            y_te = np.where(y_test_binary[source][i][target].values == 'HC', 1, 0)
+
+            # Extract country text and reshape for the encoder
+            country_tr_raw = train_country[source][i].values.reshape(-1, 1)
+            country_te_raw = test_country[source][i].values.reshape(-1, 1)
+
+            # Convert text (Austria/France) to numbers (0/1)
+            country_tr_encoded = country_encoder.fit_transform(country_tr_raw)
+            country_te_encoded = country_encoder.transform(country_te_raw)
+
+            for pipe_name, preprocessor in preprocessing_pipelines.items():
+                # Apply Scatter Corrections / Derivatives ONLY to the spectra
+                X_train_prep = preprocessor.fit_transform(X_tr_spectra)
+                X_test_prep = preprocessor.transform(X_te_spectra)
+
+                for fp_name, fp_method in feature_pipelines.items():
+                    print(f"Running -> Prep: {pipe_name} | Feature: {fp_name}...", end=" ")
+                    start_time = time.time()
+
+                    try:
+                        # Apply Feature Extraction / Selection ONLY to the spectra
+                        if fp_method is not None:
+                            X_tr_final_spectra = fp_method.fit_transform(X_train_prep, y_tr)
+                            X_te_final_spectra = fp_method.transform(X_test_prep)
+                        else:
+                            X_tr_final_spectra = X_train_prep
+                            X_te_final_spectra = X_test_prep
+
+                        # Skip if a selector dropped ALL features
+                        if X_tr_final_spectra.shape[1] == 0:
+                            print("Skipped (0 features selected).")
+                            continue
+
+                        # Glue the 0/1 country column onto the right side of the processed spectra
+                        X_tr_final = np.hstack((X_tr_final_spectra, country_tr_encoded))
+                        X_te_final = np.hstack((X_te_final_spectra, country_te_encoded))
+
+                        # Cap n_components to avoid exceeding data dimensions
+                        max_components = min(20, X_tr_final.shape[0] - 1, X_tr_final.shape[1])
+                        n_components_grid = list(range(2, max_components + 1))
+
+                        # --- PLS-DA via PLSRegression + threshold ---
+                        # PLSRegression is used because sklearn has no native PLSClassifier.
+                        # We treat it as PLS-DA by fitting on continuous y (0/1) and
+                        # thresholding the score at prediction time.
+                        best_cv_auc = -1
+                        best_n_components = 2
+
+                        cv_strategy = StratifiedKFold(n_splits=10, shuffle=True, random_state=270725)
+
+                        for n_comp in n_components_grid:
+                            pls = PLSRegression(n_components=n_comp, scale=True)
+                            cv_scores = cross_val_predict(
+                                pls, X_tr_final, y_tr.astype(float),
+                                cv=cv_strategy, method='predict'
+                            )
+                            # Continuous scores are used directly as decision values for AUC
+                            fold_auc = roc_auc_score(y_tr, cv_scores.ravel())
+                            if fold_auc > best_cv_auc:
+                                best_cv_auc = fold_auc
+                                best_n_components = n_comp
+
+                        # Refit the best PLS-DA on the full training set
+                        best_pls = PLSRegression(n_components=best_n_components, scale=True)
+
+                        # Get out-of-fold scores for threshold optimisation
+                        calibrated_cv_scores = cross_val_predict(
+                            best_pls, X_tr_final, y_tr.astype(float),
+                            cv=cv_strategy, method='predict'
+                        ).ravel()
+
+                        # Find the optimal threshold using Youden's J
+                        fpr, tpr, thresholds = roc_curve(y_tr, calibrated_cv_scores)
+                        best_idx = np.argmax(tpr - fpr)
+                        optimal_threshold = thresholds[best_idx]
+
+                        # Convert continuous scores to hard predictions using optimal threshold
+                        calibrated_cv_preds = (calibrated_cv_scores >= optimal_threshold).astype(int)
+
+                        # Calculate true CV metrics
+                        true_cv_auc      = roc_auc_score(y_tr, calibrated_cv_scores)
+                        true_cv_accuracy    = accuracy_score(y_tr, calibrated_cv_preds)
+                        true_cv_sensitivity = recall_score(y_tr, calibrated_cv_preds)
+                        true_cv_specificity = recall_score(y_tr, calibrated_cv_preds, pos_label=0)
+
+                        # Fit the best model on the FULL training set for final testing
+                        best_pls.fit(X_tr_final, y_tr.astype(float))
+
+                        # Test on the Test Set
+                        test_scores = best_pls.predict(X_te_final).ravel()
+
+                        # Apply optimal threshold to test set predictions
+                        test_preds = (test_scores >= optimal_threshold).astype(int)
+
+                        # Extract test metrics
+                        test_auc         = roc_auc_score(y_te, test_scores)
+                        test_accuracy    = accuracy_score(y_te, test_preds)
+                        test_sensitivity = recall_score(y_te, test_preds)
+                        test_specificity = recall_score(y_te, test_preds, pos_label=0)
+
+                        elapsed_time = time.time() - start_time
+                        print(f"Done! (Test AUC: {test_auc:.3f} | True CV Acc: {true_cv_accuracy:.3f})")
+
+                        # Save the results
+                        plsda_experiment_results.append({
+                            'Sample_Source':        source,
+                            'Target_Toxin':         target,
+                            'Split':                i,
+                            'Preprocessing':        pipe_name,
+                            'Feature_Method':       fp_name,
+                            'Best_n_components':    best_n_components,
+                            'Optimal_Threshold':    optimal_threshold,
+                            'True_CV_AUC':          true_cv_auc,
+                            'True_CV_Accuracy':     true_cv_accuracy,
+                            'True_CV_Sensitivity':  true_cv_sensitivity,
+                            'True_CV_Specificity':  true_cv_specificity,
+                            'Test_AUC':             test_auc,
+                            'Test_Accuracy':        test_accuracy,
+                            'Test_Sensitivity':     test_sensitivity,
+                            'Test_Specificity':     test_specificity,
+                            'Time_Sec':             np.round(elapsed_time, 2)
+                        })
+
+                    except Exception as e:
+                        print(f"Failed. Error: {str(e)}")
+
+# Combine all results into a dataframe for easier analysis
+optimizied_algorithm = pd.DataFrame(plsda_experiment_results)
+optimizied_algorithm.to_csv('./results/global_with_country/2_PLSDA_results.csv', index=False)
