@@ -120,7 +120,7 @@ def plot_threshold_distribution(df, title):
         annotate(
             'text', 
             x=(optimal_lower_thresh + optimal_upper_thresh) / 2, 
-            y=20,
+            y=8,
             label='Uncertain Zone\n(Needs Further Testing)',
             color='#555555', 
             size=10
@@ -130,8 +130,8 @@ def plot_threshold_distribution(df, title):
         annotate(
             'text', 
             x=optimal_lower_thresh/2, 
-            y=20, 
-            label="True Negative Rate of 95%", 
+            y=8, 
+            label="Negative Predictive Value > 95%", 
             color='darkblue', 
             angle=90, 
             size=8
@@ -139,8 +139,8 @@ def plot_threshold_distribution(df, title):
         annotate(
             'text',
             x=(optimal_upper_thresh + 1) / 2 + 0.02,
-            y=20,
-            label="True Positive Rate of 95%",
+            y=8,
+            label="Positive Predictive Value > 95%",
             color='darkred',
             angle=90,
             size=8

@@ -7,6 +7,7 @@
 
 # Ignore n4a files
 *.n4a
+*.pkl
 
 # Ignore .zip files
 *.zip

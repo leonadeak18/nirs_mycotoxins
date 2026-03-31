@@ -29,7 +29,7 @@ def binary_transform_with_weight(y, threshold=1000, targets=None):
         y_class[target + '_weight'] = pd.cut(
             y[target],
             [-float('inf'), threshold*0.5, threshold*1.5, float('inf')],
-            labels=[1.0, 0.2, 1.0],
+            labels=[1.0, 0.5, 1.0],
             ordered=False
         ).astype(float)
 
