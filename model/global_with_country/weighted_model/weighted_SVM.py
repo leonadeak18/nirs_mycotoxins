@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import time
 from sklearn.preprocessing import OrdinalEncoder
-from sklearn.metrics import (roc_auc_score, accuracy_score, recall_score, roc_curve)
+from sklearn.metrics import (roc_auc_score, accuracy_score, recall_score, roc_curve, average_precision_score, f1_score, matthews_corrcoef)
 from sklearn.model_selection import cross_val_predict, RandomizedSearchCV, StratifiedKFold
 from sklearn.calibration import CalibratedClassifierCV
 from model.pipeline_config import (preprocessing_pipelines, feature_pipelines, scoring_metrics, load_nirs_data)
@@ -136,10 +136,14 @@ for source in sources:
                         test_preds = (test_probs >= optimal_threshold).astype(int)
 
                         # Extract accurate test metrics
-                        test_auc = roc_auc_score(y_te, test_probs, sample_weight=te_weights)
-                        test_accuracy = accuracy_score(y_te, test_preds, sample_weight=te_weights)
-                        test_sensitivity = recall_score(y_te, test_preds, sample_weight=te_weights)
-                        test_specificity = recall_score(y_te, test_preds, pos_label=0, sample_weight=te_weights)
+                        test_auc = roc_auc_score(y_te, test_probs)
+                        test_accuracy = accuracy_score(y_te, test_preds)
+                        test_sensitivity = recall_score(y_te, test_preds)
+                        test_specificity = recall_score(y_te, test_preds, pos_label=0, zero_division=0)
+                        test_PR_curve = average_precision_score(y_te, test_preds)
+                        test_f1 = f1_score(y_te, test_preds, zero_division=0)
+                        test_mcc = matthews_corrcoef(y_te, test_preds)
+
                         
                         elapsed_time = time.time() - start_time
                         print(f"Done! (Test AUC: {test_auc:.3f} | True CV Acc: {true_cv_accuracy:.3f})")
@@ -162,6 +166,9 @@ for source in sources:
                             'Test_Accuracy': test_accuracy,
                             'Test_Sensitivity': test_sensitivity,
                             'Test_Specificity': test_specificity,
+                            'Test_PR_Curve': test_PR_curve,
+                            'Test_F1': test_f1,
+                            'Test_MCC': test_mcc,
                             'Time_Sec': np.round(elapsed_time, 2)
                         })
                         

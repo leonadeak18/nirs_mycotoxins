@@ -7,6 +7,7 @@
 # Load the Data
 ####################################################
 
+from plotnine import geom_text
 import pandas as pd
 # Define the scopes
 sources = ['intact', 'ground']
@@ -270,6 +271,7 @@ target_distribution_df = pd.concat([df for source in target_distribution.values(
 bar_plot = (
     ggplot(target_distribution_df, aes(x='Source', y='Count', fill='Category')) +
     geom_bar(stat='identity', position='dodge') +
+    geom_text(aes(label='Count'), position=position_dodge(width=0.9), va='bottom', size=8) +
     facet_wrap('~Target') +
     labs(title='Distribution of Categorized Target Variables', x='Source', y='Count') +
     theme_classic() +
@@ -297,6 +299,7 @@ target_distribution3_df = pd.concat([df for source in target_distribution3.value
 bar_plot3 = (
     ggplot(target_distribution3_df, aes(x='Source', y='Count', fill='Category')) +
     geom_bar(stat='identity', position='dodge') +
+    geom_text(aes(label='Count'), position=position_dodge(width=0.9), va='bottom', size=8) +
     facet_wrap('~Target') +
     labs(title='Distribution of 3-Category Target Variables', x='Source', y='Count') +
     theme_classic() +

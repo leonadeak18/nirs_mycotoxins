@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 ## The utility to transform continueous DON values into three classes: Low Contamination (LC), Uncertain (UC), and High Contamination (HC).
 def three_level_transform(y, targets=['DON', 'Total_DON']):
@@ -12,26 +13,36 @@ def three_level_transform(y, targets=['DON', 'Total_DON']):
     
     return y_class
 
-def binary_transform_with_weight(y, threshold=1000, targets=None):
+def binary_transform_with_weight(y, threshold=1000, uncertainty=0.5, targets=None):
+    """
+    Transforms continuous values into binary classes and calculates 
+    sample weights based on distance from threshold and data uncertainty.
+    """
     if targets is None:
         targets = y.columns
 
     y_class = pd.DataFrame(index=y.index)
+    certainty_multiplier = 1.0 - uncertainty
+    gray_area_width = threshold * uncertainty
 
     for target in targets:
-        # class label
+        
         y_class[target] = pd.cut(
             y[target],
-            [-float('inf'), threshold, float('inf')],
+            bins=[-np.inf, threshold, np.inf],
             labels=['LC', 'HC']
         )
-        # weight
-        y_class[target + '_weight'] = pd.cut(
-            y[target],
-            [-float('inf'), threshold*0.5, threshold*1.5, float('inf')],
-            labels=[1.0, 0.5, 1.0],
-            ordered=False
-        ).astype(float)
+
+        # 2. Calculate Distance Weight (Linear Ramp)
+        # Distance from threshold (e.g., |750 - 1000| = 250)
+        raw_dist = np.abs(y[target] - threshold)
+        
+        # Scale by gray_area_width (e.g., 250 / 500 = 0.5 weight)
+        # Use .clip(0, 1) to ensure anything > 1500 or < 500 stays at 1.0
+        dist_weight = (raw_dist / gray_area_width).clip(0, 1)
+
+        # 3. Combine with Certainty
+        y_class[target + '_weight'] = dist_weight * certainty_multiplier
 
     return y_class
 
