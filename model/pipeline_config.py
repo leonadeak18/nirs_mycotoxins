@@ -5,6 +5,7 @@ import pandas as pd
 from utils.preparation import binary_transform_with_weight, binary_transform
 import chemotools.scatter as ch
 from chemotools.derivative import SavitzkyGolay
+from chemotools.baseline import PolynomialCorrection
 from sklearn.pipeline import Pipeline
 from sklearn.decomposition import PCA, FastICA, FactorAnalysis
 from sklearn.feature_selection import SelectPercentile, SelectFdr, f_classif, SelectFromModel, RFE
@@ -16,7 +17,7 @@ from sklearn.metrics import (roc_auc_score, accuracy_score, recall_score, make_s
 # --- STATIC CONFIGURATIONS ---
 preprocessing_pipelines = {
     "SNV_Smoothing": Pipeline([('snv', ch.StandardNormalVariate()), ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv=0))]),
-    "EMSC_Smoothing": Pipeline([('emsc', ch.ExtendedMultiplicativeScatterCorrection()), ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv=0))]),
+    "Detrending_SNV": Pipeline([('detrending', PolynomialCorrection(order = 2)), ('snv', ch.StandardNormalVariate()), ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv=0))]),
     "1st_derivative": Pipeline([('first_derivative', SavitzkyGolay(window_length=15, polyorder=2, deriv=1))]),
     "2nd_derivative": Pipeline([('second_derivative', SavitzkyGolay(window_length=15, polyorder=2, deriv=2))]),
     "RNV_Smoothing": Pipeline([('rnv', ch.RobustNormalVariate()), ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv=0))])
@@ -29,8 +30,8 @@ feature_pipelines = {
     "Factor_Analysis": Pipeline([('Factor_Analysis', FactorAnalysis(n_components=30, random_state=270725))]),
     "ANOVA_Pencentile": Pipeline([('ANOVA_Percentile', SelectPercentile(score_func=f_classif, percentile=20))]),
     "ANOVA_FDR": Pipeline([('ANOVA_FDR', SelectFdr(score_func=f_classif, alpha=0.05))]),
-    "Lasso L1 (Selector)": Pipeline([('scaler', StandardScaler()), ('Lasso_L1', SelectFromModel(LogisticRegression(penalty='l1', solver='liblinear', C=10, random_state=270725)))]),   
-    "RFE": Pipeline([('scaler', StandardScaler()), ('RFE', RFE(estimator=SVC(kernel='linear', random_state=270726), n_features_to_select=50, step=0.1))])
+    "Lasso L1 (Selector)": Pipeline([('scaler', StandardScaler()), ('Lasso_L1', SelectFromModel(LogisticRegression(penalty='l1', solver='liblinear', C=10, dual = "auto", random_state=270725)))]),   
+    "RFE": Pipeline([('scaler', StandardScaler()), ('RFE', RFE(estimator=SVC(kernel='linear', gamma = "auto", random_state=270726), n_features_to_select=50, step=0.1))])
 }
 
 scoring_metrics = {
