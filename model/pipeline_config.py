@@ -24,12 +24,12 @@ preprocessing_pipelines = {
 }
 
 feature_pipelines = {
-    # "Full_spectra": None,
-    # "PCA": Pipeline([('PCA', PCA(n_components=0.99, random_state=270725))]),
-    # "ICA": Pipeline([('ICA', FastICA(n_components=30, max_iter=4000, tol = 0.001, random_state=270725))]),
-    # "Factor_Analysis": Pipeline([('Factor_Analysis', FactorAnalysis(n_components=30, random_state=270725))]),
-    # "ANOVA_Pencentile": Pipeline([('ANOVA_Percentile', SelectPercentile(score_func=f_classif, percentile=20))]),
-    # "ANOVA_FDR": Pipeline([('ANOVA_FDR', SelectFdr(score_func=f_classif, alpha=0.05))]),
+    "Full_spectra": None,
+    "PCA": Pipeline([('PCA', PCA(n_components=0.99, random_state=270725))]),
+    "ICA": Pipeline([('ICA', FastICA(n_components=30, max_iter=4000, tol = 0.001, random_state=270725))]),
+    "Factor_Analysis": Pipeline([('Factor_Analysis', FactorAnalysis(n_components=30, random_state=270725))]),
+    "ANOVA_Pencentile": Pipeline([('ANOVA_Percentile', SelectPercentile(score_func=f_classif, percentile=20))]),
+    "ANOVA_FDR": Pipeline([('ANOVA_FDR', SelectFdr(score_func=f_classif, alpha=0.05))]),
     "Lasso L1 (Selector)": Pipeline([('scaler', StandardScaler()), ('Lasso_L1', SelectFromModel(LogisticRegression(l1_ratio = 1.0, solver='liblinear', C=10, dual = False, random_state=270725)))]),   
     "RFE": Pipeline([('scaler', StandardScaler()), ('RFE', RFE(estimator=SVC(kernel='linear', gamma = "auto", random_state=270726), n_features_to_select=50, step=0.1))])
 }
