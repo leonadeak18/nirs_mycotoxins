@@ -38,10 +38,8 @@ def binary_transform_with_weight(y, threshold=1000, uncertainty=0.5, targets=Non
         raw_dist = np.abs(y[target] - threshold)
         
         # Scale by gray_area_width (e.g., 250 / 500 = 0.5 weight)
-        # Use .clip(0, 1) to ensure anything > 1500 or < 500 stays at 1.0
-        dist_weight = (raw_dist / gray_area_width).clip(0, 1)
-
-        # 3. Combine with Certainty
+        # Use .clip(0, 2) to ensure anything > 1500 or < 500 stays at 1.0 after multiplying by certainty_multiplier
+        dist_weight = (raw_dist / gray_area_width).clip(0, 2)
         y_class[target + '_weight'] = dist_weight * certainty_multiplier
 
     return y_class

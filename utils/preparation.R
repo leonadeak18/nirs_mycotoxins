@@ -61,13 +61,11 @@ binary_transform_with_weight <- function(y, threshold = 1000, uncertainty = 0.5,
     # 3. Distance from threshold (using the numeric vector 'val')
     raw_dist <- abs(val - threshold)
     
-    # 4. Scale and clip between 0 and 1
+    # 4. Scale and clip between 0 and 2 (so that after multiplying by certainty_multiplier, it maxes out at 1.0)
     dist_weight <- pmin(pmax(raw_dist / gray_area_width, 0), 2)
-    
-    # 5. Combine with certainty
     final_weight <- dist_weight * certainty_multiplier
     
-    # 6. Store as a data frame within the list to hold both values
+    # 5. Store as a data frame within the list to hold both values
     y_class[[target]] <- data.frame(
       Class = cls,
       Weight = final_weight,
