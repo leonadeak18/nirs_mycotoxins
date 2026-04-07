@@ -5,41 +5,49 @@ import pandas as pd
 import numpy as np
 import time
 from sklearn.preprocessing import OrdinalEncoder
-from sklearn.metrics import (roc_auc_score, accuracy_score, recall_score, roc_curve, average_precision_score, f1_score, matthews_corrcoef)
+from sklearn.metrics import (roc_auc_score, accuracy_score, recall_score, roc_curve, 
+                             average_precision_score, f1_score, matthews_corrcoef)
 from sklearn.model_selection import cross_val_predict, RandomizedSearchCV, StratifiedKFold
 from sklearn.calibration import CalibratedClassifierCV
-from model.pipeline_config import (preprocessing_pipelines, feature_pipelines, scoring_metrics, load_nirs_data)
+from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
 
-#import the data
-X_train, X_test, y_train_weighted_binary, y_test_weighted_binary, train_country, test_country = load_nirs_data(splits=10, threshold=1000, weighted=True)
+# Import custom configurations
+from model.pipeline_config import (preprocessing_pipelines, feature_pipelines, 
+                                   scoring_metrics, load_nirs_data)
 
-# define the sources and targets for iteration
+# Import the weighted data
+X_train, X_test, y_train_weighted_binary, y_test_weighted_binary, train_country, test_country = load_nirs_data(
+    splits=10, threshold=1000, weighted=True
+)
+
+# Define the sources and targets for iteration
 sources = ['intact', 'ground']
 targets = ['DON', 'Total_DON']
 
 # ==========================================
 # RF MODEL OPTIMIZATION
 # ==========================================
-# Define the grid of parameters for the Random Forest to test
+wrf_experiment_results = []
+
+# Parameter distribution for RandomizedSearchCV
 rf_param_dist = {
-    'n_estimators': [100, 200, 300, 500, 700, 1000], 
-    'max_features': ['sqrt', 'log2', 0.2, 0.3, 0.5], 
-    'max_depth': [None, 5, 10, 20, 30, 40, 50],              
-    'min_samples_split': [2, 5, 10, 20, 50],
-    'min_samples_leaf': [1, 2, 4, 10, 20, 40, 50]
+    'rf__n_estimators': [100, 200, 300, 500, 700, 1000], 
+    'rf__max_features': ['sqrt', 'log2', 0.2, 0.3, 0.5], 
+    'rf__max_depth': [None, 5, 10, 20, 30, 40, 50],              
+    'rf__min_samples_split': [2, 5, 10, 20, 50],
+    'rf__min_samples_leaf': [1, 2, 4, 10, 20, 40, 50]
 }
 
-wrf_experiment_results = []
 # Initialize the encoder for the countries
 country_encoder = OrdinalEncoder()
 
 for source in sources:
     for target in targets:
         for i in range(10): 
-            print(f"Evaluating: {source} samples for {target} (Split {i})")
+            print(f"\nEvaluating: {source} samples for {target} (Split {i+1}/10)")
             
-            # Extract the specific data arrays for this specific split
+            # Extract raw data arrays
             X_tr_spectra = X_train[source][i].values
             X_te_spectra = X_test[source][i].values
             
@@ -52,38 +60,31 @@ for source in sources:
             te_weights = y_test_weighted_binary[source][i][target + '_weight'].values
             
             for pipe_name, preprocessor in preprocessing_pipelines.items():
-                # Apply Scatter Corrections / Derivatives ONLY to the spectra
-                X_train_prep = preprocessor.fit_transform(X_tr_spectra)
-                X_test_prep = preprocessor.transform(X_te_spectra)
-
                 for fp_name, fp_method in feature_pipelines.items():
-                    print(f"Running -> Prep: {pipe_name} | Feature: {fp_name}...", end=" ")
+                    print(f"  -> Running Prep: {pipe_name} | Feature: {fp_name}...", end=" ")
                     start_time = time.time()
                     
                     try:
-                        # Apply Feature Extraction / Selection ONLY to the spectra
+                        # --------------------------------------------------------
+                        # BUILD THE TUNING PIPELINE
+                        # --------------------------------------------------------
+                        steps = []
+                        if preprocessor is not None:
+                            steps.append(('prep', preprocessor))
                         if fp_method is not None:
-                            X_tr_final_spectra = fp_method.fit_transform(X_train_prep, y_tr)
-                            X_te_final_spectra = fp_method.transform(X_test_prep)
-                        else:
-                            X_tr_final_spectra = X_train_prep
-                            X_te_final_spectra = X_test_prep
+                            steps.append(('feature_selection', fp_method))
                             
-                        # Skip if a selector dropped ALL features
-                        if X_tr_final_spectra.shape[1] == 0:
-                            print("Skipped (0 features selected).")
-                            continue
-
-                        # Define X_tr_final and X_te_final
-                        X_tr_final = X_tr_final_spectra.copy()
-                        X_te_final = X_te_final_spectra.copy()
-
-                        # Define base Random Forest model
+                        # Base RF model
                         base_rf = RandomForestClassifier(class_weight='balanced', random_state=270725)
+                        steps.append(('rf', base_rf))
                         
-                        # Run Randomized Search to find the best parameters on the COMBINED data
+                        tuning_pipeline = Pipeline(steps)
+                        
+                        # --------------------------------------------------------
+                        # INNER LOOP: HYPERPARAMETER TUNING (With Weights)
+                        # --------------------------------------------------------
                         random_search = RandomizedSearchCV(
-                            estimator=base_rf,
+                            estimator=tuning_pipeline,
                             param_distributions=rf_param_dist,
                             n_iter=20,          
                             cv=10,
@@ -92,45 +93,63 @@ for source in sources:
                             n_jobs=-1,          
                             random_state=270725
                         )
-                        random_search.fit(X_tr_final, y_tr, sample_weight = tr_weights)
                         
-                        # Extract the winning RF and Calibrate it
-                        best_rf = random_search.best_estimator_
-                        best_rf.probability = True
+                        # Route the weights specifically to the RF step inside the Pipeline
+                        random_search.fit(X_tr_spectra, y_tr, rf__sample_weight=tr_weights)
+                        
+                        # --------------------------------------------------------
+                        # REBUILD PIPELINE WITH INTERNAL CALIBRATOR
+                        # --------------------------------------------------------
+                        # Extract ONLY the winning RF to wrap in the calibrator
+                        best_rf = random_search.best_estimator_.named_steps['rf']
                         calibrated_rf = CalibratedClassifierCV(best_rf, cv=10, method='sigmoid')
 
-                        # Get true, out-of-fold calibrated probabilities for the training set
+                        # Build the final pipeline with the calibrator safely nestled inside
+                        final_steps = []
+                        if preprocessor is not None:
+                            final_steps.append(('prep', preprocessor))
+                        if fp_method is not None:
+                            final_steps.append(('feature_selection', fp_method))
+                        final_steps.append(('calibrated_rf', calibrated_rf))
+                        
+                        final_pipeline = Pipeline(final_steps)
+
+                        # --------------------------------------------------------
+                        # OUT-OF-FOLD CALIBRATION & THRESHOLD OPTIMIZATION
+                        # --------------------------------------------------------
                         cv_strategy = StratifiedKFold(n_splits=10, shuffle=True, random_state=270725)
+                        
+                        # Safely route weights to the calibrator inside the final pipeline
                         calibrated_cv_probs = cross_val_predict(
-                            calibrated_rf, X_tr_final, y_tr, 
+                            final_pipeline, X_tr_spectra, y_tr, 
                             cv=cv_strategy, method='predict_proba', n_jobs=-1,
-                            params={'sample_weight': tr_weights} 
+                            params={'calibrated_rf__sample_weight': tr_weights} 
                         )
                         
-                        # Find the optimal threshold using Youden's J
+                        # Find optimal threshold using Youden's J (Weighted)
                         fpr, tpr, thresholds = roc_curve(y_tr, calibrated_cv_probs[:, 1], sample_weight=tr_weights)
                         best_idx = np.argmax(tpr - fpr)
                         optimal_threshold = thresholds[best_idx]
                         
-                        # Convert probabilities to hard predictions using your optimized threshold
                         calibrated_cv_preds = (calibrated_cv_probs[:, 1] >= optimal_threshold).astype(int)
                         
-                        # Calculate true CV metrics
+                        # Calculate true CV metrics (Weighted)
                         true_cv_auc = roc_auc_score(y_tr, calibrated_cv_probs[:, 1], sample_weight=tr_weights)
                         true_cv_accuracy = accuracy_score(y_tr, calibrated_cv_preds, sample_weight=tr_weights)
                         true_cv_sensitivity = recall_score(y_tr, calibrated_cv_preds, sample_weight=tr_weights)
                         true_cv_specificity = recall_score(y_tr, calibrated_cv_preds, pos_label=0, sample_weight=tr_weights)
                         
-                        # Fit the calibrator on the FULL training set for final testing
-                        calibrated_rf.fit(X_tr_final, y_tr, sample_weight=tr_weights)
+                        # --------------------------------------------------------
+                        # OUTER LOOP: FINAL EXAMINATION ON TEST SET
+                        # --------------------------------------------------------
+                        # Fit the entire architecture from scratch on all training data
+                        final_pipeline.fit(X_tr_spectra, y_tr, calibrated_rf__sample_weight=tr_weights)
                         
-                        # Test on the Test Set
-                        test_probs = calibrated_rf.predict_proba(X_te_final)[:, 1]
-                        
-                        # Apply your optimal threshold to the test set predictions
+                        # Predict on the raw test vault!
+                        test_probs = final_pipeline.predict_proba(X_te_spectra)[:, 1]
                         test_preds = (test_probs >= optimal_threshold).astype(int)
 
-                        # Extract accurate test metrics
+                        # Extract accurate test metrics (Unweighted, as is standard for test data)
                         test_auc = roc_auc_score(y_te, test_probs)
                         test_accuracy = accuracy_score(y_te, test_preds)
                         test_sensitivity = recall_score(y_te, test_preds)
@@ -142,18 +161,20 @@ for source in sources:
                         elapsed_time = time.time() - start_time
                         print(f"Done! (Test AUC: {test_auc:.3f} | True CV Acc: {true_cv_accuracy:.3f})")
                         
-                        # Save the aligned results!
+                        # --------------------------------------------------------
+                        # SAVE RESULTS
+                        # --------------------------------------------------------
                         wrf_experiment_results.append({
                             'Sample_Source': source,
                             'Target_Toxin': target,
                             'Preprocessing': pipe_name,
                             'Split': i,
                             'Feature_Method': fp_name,
-                            'Best_n_estimators': random_search.best_params_['n_estimators'],
-                            'Best_max_depth': random_search.best_params_['max_depth'],
-                            'Best_max_features': random_search.best_params_['max_features'],
-                            'Best_min_samples_split': random_search.best_params_['min_samples_split'],
-                            'Best_min_samples_leaf': random_search.best_params_['min_samples_leaf'],
+                            'Best_n_estimators': random_search.best_params_['rf__n_estimators'],
+                            'Best_max_depth': random_search.best_params_['rf__max_depth'],
+                            'Best_max_features': random_search.best_params_['rf__max_features'],
+                            'Best_min_samples_split': random_search.best_params_['rf__min_samples_split'],
+                            'Best_min_samples_leaf': random_search.best_params_['rf__min_samples_leaf'],
                             'Optimal_Threshold': optimal_threshold,
                             'True_CV_AUC': true_cv_auc,
                             'True_CV_Accuracy': true_cv_accuracy,
@@ -172,6 +193,7 @@ for source in sources:
                     except Exception as e:
                         print(f"Failed. Error: {str(e)}")
 
-# Combine all results into a dataframe for easier analysis
+# Combine all results into a dataframe and save
 optimizied_algorithm = pd.DataFrame(wrf_experiment_results)
 optimizied_algorithm.to_csv('./results/mixed_all/weighted_RF_results.csv', index=False)
+print("\nAll combinations processed successfully! Weighted RF data saved to CSV.")
