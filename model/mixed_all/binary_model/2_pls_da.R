@@ -1,110 +1,32 @@
 # import all dataset
-## import the spectra
-spectra <- list(
-  train = list(
-    "intact" = read.csv("nirs/train_test_set/X_train_intact.csv"),
-    "ground" = read.csv("nirs/train_test_set/X_train_ground.csv")
-  ),
-  test = list(
-    "intact" = read.csv("nirs/train_test_set/X_test_intact.csv"),
-    "ground" = read.csv("nirs/train_test_set/X_test_ground.csv")
-   )
-)
-### format the spectra
 source("./utils/preparation.R")
-spectra <- lapply(spectra, function(material) {
-  lapply(material, function(df) {
-    prepare_df(df, 1100, 2500)
-  })
-})
-
-## import the reference values
-files <- list(
-  train = list(
-    intact = "nirs/train_test_set/y_train_intact.csv",
-    ground = "nirs/train_test_set/y_train_ground.csv"
-  ),
-  test = list(
-    intact = "nirs/train_test_set/y_test_intact.csv",
-    ground = "nirs/train_test_set/y_test_ground.csv"
-  )
-)
-
-ref <- lapply(files, function(material) {
-  lapply(material, function(path) {
-    df <- read.csv(path)
-    list(
-      DON = df[, c(1, 2)],
-      Total_DON = df[, c(1, 3)]
-    )
-  })
-})
-### format the reference values
-ref <- lapply(ref, function(df_type) {
-  lapply(df_type, function(material) {
-    lapply(material, function(df) {
-      binary_transform(df, cutoff = 1000)
-    })
-  })
-})
-str(ref$train$intact$DON)
+source("./model/pipeline_config.R")
+nirs_data <- load_nirs_data(weighted = TRUE)
 
 # Load necessary libraries
-library(mixOmics)
+library(rchemo)
 library(spectacles)
 library(prospectr)
-library(EMSC)
-library(BiocParallel)
 
 # Define preprocessing methods
 prep_methods <- list(
-  'Raw'     = function(x) savitzkyGolay(x, w = 15, p = 2, m = 0),
   'SNV'     = function(x) savitzkyGolay(standardNormalVariate(x), w = 15, p = 2, m = 0),
+  'Detrend_SNV' = function(x) savitzkyGolay(detrend(x, wav = as.numeric(colnames(x))), w = 15, p = 2, m = 0),
   '1st_Der' = function(x) savitzkyGolay(x, w = 15, p = 2, m = 1),
   '2nd_Der' = function(x) savitzkyGolay(x, w = 15, p = 2, m = 2),
-  'EMSC'    = function(x) {
-    df <- EMSC(x, degree = 2)
-    temp <- df$corrected
-    output <- savitzkyGolay(temp, w = 15, p = 2, m = 0)
-    return(output)
-  },
   "RNV"     = function(x) savitzkyGolay(rnv(x, r = 0.25), w = 15, p = 2, m = 0)
 )
 
 # Main function
 pipeline_2_plsda <- function(X_list, y_list, max_comp = 20, k_folds = 10, n_iter = 10, pb = TRUE) {
-  #define cores for parallel processing
-  n_cores <- round(parallel::detectCores() * 0.9, 0)
-  #auto set correct parallel assignment for mixOmics perf function
-  if (.Platform$OS.type == "unix") {
-  
-  parallel_param <- MulticoreParam(workers = n_cores)
-  message("Linux/Mac detected: Using MulticoreParam with ", n_cores, " cores.")
-  
-  } else if (.Platform$OS.type == "windows") {
-  
-  # Triggered on Windows
-  parallel_param <- SnowParam(workers = n_cores)
-  message("Windows detected: Using SnowParam with ", n_cores, " cores.")
-  
-  } else {
-  
-  # Fallback for unsupported systems to prevent crashes
-  parallel_param <- SerialParam()
-  message("Unrecognized OS: Defaulting to sequential processing (1 core).")
-  
-  }
-
   #define an empty list to store results
   results_list <- list() 
-  distance_metrics <- c('max.dist', 'centroids.dist', 'mahalanobis.dist')
-  data_types <- c('overall', 'BER')
   
   # Separate train and test datasets
-  X_train <- X_list[["train"]]
-  y_train <- y_list[["train"]]
-  X_test <- X_list[["test"]]
-  y_test <- y_list[["test"]]
+  X_train <- nirs_data[["X_train"]]
+  y_train <- nirs_data[["y_train"]]
+  X_test <- nirs_data[["X_test"]]
+  y_test <- nirs_data[["y_test"]]
 
   # Loop through each dataset
   for (material in names(X_train)) {
