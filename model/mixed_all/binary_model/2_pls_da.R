@@ -5,8 +5,10 @@ nirs_data <- load_nirs_data(weighted = TRUE)
 
 # Load necessary libraries
 library(rchemo)
-library(spectacles)
+library(pROC)
 library(prospectr)
+library(spectacles)
+library(PRROC)
 
 # Define preprocessing methods
 prep_methods <- list(
@@ -17,94 +19,143 @@ prep_methods <- list(
   "RNV"     = function(x) savitzkyGolay(rnv(x, r = 0.25), w = 15, p = 2, m = 0)
 )
 
-# Main function
-pipeline_2_plsda <- function(X_list, y_list, max_comp = 20, k_folds = 10, n_iter = 10, pb = TRUE) {
-  #define an empty list to store results
-  results_list <- list() 
+pipeline_binary_plsda_sequential <- function(nirs_data, max_nlv = 25) {
   
-  # Separate train and test datasets
-  X_train <- nirs_data[["X_train"]]
-  y_train <- nirs_data[["y_train"]]
-  X_test <- nirs_data[["X_test"]]
-  y_test <- nirs_data[["y_test"]]
-
-  # Loop through each dataset
-  for (material in names(X_train)) {
-    X_material <- X_train[[material]]
+  results_list <- list()
+  preps <- names(prep_methods)
     
-    for (toxin in names(y_train[[material]])) {
-      y_toxin_raw <- y_train[[material]][[toxin]]
-      y_toxin <- as.factor(unlist(y_toxin_raw))
-      dataset_name <- paste("Dataset", material, "with Ref", toxin)
-      
-      # Loop through each preprocessing method
-      for (prep_name in names(prep_methods)) {
-        X_prep <- prep_methods[[prep_name]](X_material)
-        
-        # Execute PLS-DA with cross-validation
-        plsda_model <- plsda(X_prep, y_toxin, ncomp = max_comp, max.iter = 1000, near.zero.var = TRUE)
-        perf_plsda <- perf(plsda_model, validation = 'Mfold', folds = k_folds, 
-                           progressBar = pb, nrepeat = n_iter, BPPARAM = parallel_param, seed = 123)
-        
-        # message() is generally preferred over print() for progress updates in R loops
-        message(paste(dataset_name, "- Preprocessing:", prep_name, "is done"))
-        
-        # Store results and predict on test set
-        for (metric in distance_metrics) {
-          for (type in data_types) {
-            
-            # choice.ncomp matrix
-            opt_comp <- perf_plsda$choice.ncomp[type, metric]
-            
-            #Safety check: mixOmics occasionally returns NA for optimal components
-            if (is.na(opt_comp)) {
-              err_rate <- NA
-              err_rate_sd <- NA
-            } else {
-              err_rate <- perf_plsda$error.rate[[type]][opt_comp, metric]
-              err_rate_sd <- perf_plsda$error.rate.sd[[type]][opt_comp, metric]
+  materials <- c("intact", "ground")
+  toxins <- c("DON", "Total_DON")
+  
+  for (material in materials) {
+    for (i in 1:10) { 
+      for (toxin in toxins) {
+        for (prep_name in preps) {
+          
+          # Data Cleaning and Binary transformation
+          X_train_raw <- as.matrix(nirs_data$X_train[[material]][[i]])
+          X_test_raw  <- as.matrix(nirs_data$X_test[[material]][[i]])
+          
+          ## Extract raw classes and strictly convert HC->1 and LC->0
+          y_train_raw  <- unlist(nirs_data$y_train[[material]][[i]][[toxin]]$Class)
+          y_train      <- ifelse(y_train_raw == "HC", "1", "0")
+          names(y_train) <- rownames(X_train_raw)
 
-              ## Predict on test set
-              X_test_prep <- prep_methods[[prep_name]](X_test[[material]])
-              prediction <- predict(plsda_model, X_test_prep, dist = metric)
-              test_results <- data.frame(prediction$class[[metric]][, opt_comp], 
-                                         Truth = as.factor(unlist(y_test[[material]][[toxin]])))
-              accuracy <- sum(test_results[,1] == test_results$Truth) / nrow(test_results)
-              sensitivity <- sum(test_results[,1] == "HC" & test_results$Truth == "HC") / sum(test_results$Truth == "HC")
-              specificity <- sum(test_results[,1] == "LC" & test_results$Truth == "LC") / sum(test_results$Truth == "LC")
-            }
-            
-            # Append to list
-            results_list[[length(results_list) + 1]] <- data.frame(  
-              X = material,
-              Y = toxin,
-              Preprocessing = prep_name,
-              distance_metrics = metric,
-              data_types = type,
-              min_ncomp = opt_comp,
-              error_rate = err_rate,
-              error_rate_sd = err_rate_sd,
-              n_repeats = n_iter,
-              test_accuracy = ifelse(is.na(opt_comp), NA, accuracy),
-              test_sensitivity = ifelse(is.na(opt_comp), NA, sensitivity),
-              test_specificity = ifelse(is.na(opt_comp), NA, specificity)
-            )
+          #w_train      <- as.numeric(unlist(nirs_data$y_train[[material]][[i]][[toxin]]$Weight))
+          #names(w_train) <- rownames(X_train_raw)
+
+          ## Convert test set to 1 and 0
+          y_test_raw   <- unlist(nirs_data$y_test[[material]][[i]][[toxin]]$Class)
+          y_test       <- ifelse(y_test_raw == "HC", "1", "0")
+          
+          # Apply Spectra Preprocessing
+          X_train_prep <- prep_methods[[prep_name]](X_train_raw)
+          X_test_prep  <- prep_methods[[prep_name]](X_test_raw)
+          
+          # Optimize the nLV through CV with k =10 for 10-times
+          res_nlv <- plsr_plsda_allsteps(
+                    X = X_train_prep, Xname = NULL, 
+                    Xscaling = "none", 
+                    Y = y_train, Yscaling = "none", weights = NULL,
+                    newX = NULL, newXname = NULL,
+                    
+                    method = "plsrda",
+                    prior = "unif",
+                    step = "nlvtest",
+                    nlv = max_nlv, 
+                    modeloutput = c("scores","loadings","coef","vip"), 
+                    
+                    cvmethod = "kfolds", 
+                    nbrep = 10, 
+                    seed = 270725, 
+                    nfolds = 10, 
+                    criterion = "err", 
+                    selection = "globalmin"
+          )
+          
+          # extract the optimum nlv
+          opt_idx <- which(res_nlv$optimum == 1)[1]
+          error_cv    <- res_nlv$err_mean[[opt_idx]]
+          error_cv_sd <- res_nlv$err_sd[[opt_idx]]
+          
+          # Final model & prediction on test set
+          final_mod <- plsrda(X = X_train_prep, y = y_train, weights = NULL, nlv = opt_idx)
+          preds     <- predict(final_mod, X_test_prep)
+          
+          # Binarized Matrix Extraction
+          y_test_f <- factor(y_test, levels = c("0", "1"))
+          pred_f   <- factor(preds$pred, levels = c("0", "1"))
+          cm       <- table(Predicted = pred_f, Actual = y_test_f)
+          
+          # Safely extract 1s (Positives) and 0s (Negatives)
+          tp <- if("1" %in% rownames(cm) && "1" %in% colnames(cm)) cm["1", "1"] else 0
+          tn <- if("0" %in% rownames(cm) && "0" %in% colnames(cm)) cm["0", "0"] else 0
+          fp <- if("1" %in% rownames(cm) && "0" %in% colnames(cm)) cm["1", "0"] else 0
+          fn <- if("0" %in% rownames(cm) && "1" %in% colnames(cm)) cm["0", "1"] else 0
+          
+          # determine the accuracy, sensitivity, and specitifity
+          acc  <- (tp + tn) / sum(cm)
+          sens <- if((tp + fn) > 0) tp / (tp + fn) else 0
+          spec <- if((tn + fp) > 0) tn / (tn + fp) else 0
+          
+          #determine the MCC
+          mcc_num <- (as.numeric(tp) * tn) - (as.numeric(fp) * fn)
+          mcc_den <- sqrt(as.numeric(tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+          mcc_val <- if(is.na(mcc_den) || mcc_den == 0) 0 else mcc_num / mcc_den
+          
+          # AUC-ROC & Optimal Threshold 
+          # Extract column 2 as our positive class scores.
+          scores_pos <- preds$posterior[, 2]
+          
+          # Force the direction to "<" so lower will predicts 0 and higher to predict 1
+          roc_obj <- roc(y_test_f, scores_pos, levels = c("0", "1"), direction = "<", quiet = TRUE)
+          auc_val <- as.numeric(auc(roc_obj))
+          ## deteermine the optimal threshold
+          best_coords <- coords(roc_obj, x = "best", best.method = "youden", ret = "threshold")
+          opt_thresh  <- as.numeric(unlist(best_coords))[1] 
+          
+          # Determine the PR-Curve
+          scores_hc <- scores_pos[y_test == "1"]
+          scores_lc <- scores_pos[y_test == "0"]
+          
+          if(length(scores_hc) > 0 && length(scores_lc) > 0) {
+            ## PRROC package demand scores.class0 for positive
+            pr_obj <- pr.curve(scores.class0 = scores_hc, scores.class1 = scores_lc, curve = FALSE)
+            pr_auc_val <- pr_obj$auc.integral
+          } else {
+            pr_auc_val <- NA 
           }
+          
+          # Store results
+          res_row <- data.frame(
+            Sample_source = material,
+            Target_toxin = toxin,
+            Preprocessing = prep_name,
+            Split = i,
+            LV = opt_idx,
+            Err_CV = round(error_cv, 4),
+            Err_CV_SD = round(error_cv_sd, 4),
+            Accuracy = round(acc, 4),
+            Sensitivity = round(sens, 4),
+            Specitifity = round(spec, 4),
+            MCC = round(mcc_val, 4),
+            ROC_AUC = round(auc_val, 4),
+            PR_AUC = round(pr_auc_val, 4),
+            Opt_Threshold = round(opt_thresh, 4)
+          )
+          
+          results_list[[length(results_list) + 1]] <- res_row
+          cat(sprintf("Done: Dataset %d| Material %s | Toxin %s | Prep %s\n", i, material, toxin, prep_name))
         }
       }
     }
-  } 
-  message("Pipeline execution completed!")
+  }
   
-  # 5. Bind the list into a single data frame at the very end
-  final_results <- do.call(rbind, results_list)
-  return(final_results)
+  final_df <- do.call(rbind, results_list)
+  message("Pipeline completed!")
+  return(final_df)
 }
 
-# Run the pipeline
-don_plsda <- pipeline_2_plsda(X_list = spectra, y_list = ref, max_comp = 20, k_folds = 10, n_iter = 10, pb = TRUE)
-
-# Save the outputs
-write.csv(don_plsda, "./results/2_plsda_results.csv", row.names = FALSE)
-save.image("./results/2_plsda_results.RData")
-load("./results/2_plsda_results.RData")
+# --- Execution ---
+binary_plsda_results <- pipeline_binary_plsda_sequential(nirs_data)
+write.csv(binary_plsda_results, "./results/mixed_all/2_plsda_results.csv", row.names = FALSE)
