@@ -2,10 +2,10 @@
 ###### PLS-DA evaluation #########
 ##################################
 import numpy as np
-from scipy.stats import wilcoxon
+from scipy.stats import mannwhitneyu, ttest_ind, shapiro
 import pandas as pd
 from plotnine import (ggplot, aes, geom_boxplot, geom_jitter, geom_text, 
-                      theme_classic, labs, theme, element_text, expand_limits)
+                      theme_classic, labs, theme, element_text, expand_limits, scale_y_continuous)
 
 #------- Determine the best model by boxplot -------#
 # Importing the datasets
@@ -39,13 +39,14 @@ for key in data_top.keys():
         + geom_boxplot(show_legend=False, alpha=0.7)
         + geom_jitter(alpha=0.3, width=0.1, size=2, show_legend=False)
         + theme_classic()
+        + scale_y_continuous(limits=(0.3, 0.9))
         + labs(
             title=f"Top Models Comparison ({key.replace('_', ' ').title()})", 
             x="Model Configuration (Rank 1 on the Left)", 
             y="Matthews Correlation Coefficient (MCC)"
         )
         + theme(
-            axis_text_x=element_text( size=9),
+            axis_text_x=element_text(size=9),
             plot_title=element_text(size=14, weight='bold')
         )
     )
@@ -59,7 +60,7 @@ for key, plot in plots.items():
 ## the best model is the weighted Total_DON in intact with SNV preprocessing, we will compare it with other effects
 best_model_str = "Total_DON (intact)\nSNV"
 
-# Function to calculate Wilcoxon stars compared to a reference
+# Function to calculate statistical significance with dynamic test selection
 def get_sig_df(df, ref_name, group_col='model', val_col='MCC'):
     ref_vals = df[df[group_col] == ref_name].sort_values('Split')[val_col].values
     groups = df[group_col].unique()
@@ -71,16 +72,41 @@ def get_sig_df(df, ref_name, group_col='model', val_col='MCC'):
             continue
             
         comp_vals = df[df[group_col] == g].sort_values('Split')[val_col].values
-        if len(ref_vals) == len(comp_vals):
-            _, p = wilcoxon(ref_vals, comp_vals)
+        
+        try:
+            # 1. Normality Test (Shapiro-Wilk)
+            # Requires at least 3 samples to run the test
+            if len(ref_vals) >= 3 and len(comp_vals) >= 3:
+                _, p_norm_ref = shapiro(ref_vals)
+                _, p_norm_comp = shapiro(comp_vals)
+                
+                # If p >= 0.05, we fail to reject the null hypothesis (data is normally distributed)
+                is_normal = (p_norm_ref >= 0.05) and (p_norm_comp >= 0.05)
+            else:
+                # If we don't have enough data to prove normality, default to non-parametric
+                is_normal = False
+            
+            # 2. Select and run the appropriate statistical test
+            if is_normal:
+                # Use Welch's t-test (equal_var=False) as a safer default for normally distributed data
+                _, p = ttest_ind(ref_vals, comp_vals, equal_var=False)
+                print(f"Comparing {ref_name} vs {g} using Welch's t-test: p-value = {p:.4f}")
+            else:
+                # Fallback to Mann-Whitney U for non-normal distributions
+                _, p = mannwhitneyu(ref_vals, comp_vals, alternative='two-sided')
+                print(f"Comparing {ref_name} vs {g} using Mann-Whitney U test: p-value = {p:.4f}")
+            
+            # 3. Assign significance stars
             if p < 0.001: star = "***"
             elif p < 0.01: star = "**"
             elif p < 0.05: star = "*"
             else: star = "ns"
-        else:
+            
+        except ValueError:
             star = "n/a"
         
         stats_list.append({group_col: g, 'p_label': star, 'y_pos': df[df[group_col] == g][val_col].max() + 0.05})
+        
     return pd.DataFrame(stats_list)
 
 #------- Define the 4 Comparisons -------#
@@ -106,13 +132,23 @@ df4_nw = data["non_weighted"][data["non_weighted"]['model'] == best_model_str].c
 df4_nw['model'] = f"{best_model_str} Non-Weighted"
 df4 = pd.concat([df4_w, df4_nw])
 df4['model'] = pd.Categorical(df4['model'], categories=[f"{best_model_str} Weighted", f"{best_model_str} Non-Weighted"])
+
+# Plot 5: Weighting Effect (the best vs the best models)
+df5_w = data["weighted"][data["weighted"]['model'] == best_model_str].copy()
+df5_w['model'] = f"{best_model_str} Weighted"
+df5_nw = data["non_weighted"][data["non_weighted"]['model'] == "Total_DON (intact)\n1st_Der"].copy()
+df5_nw['model'] = "Total_DON (intact)\n1st_Der Non-Weighted"
+df5 = pd.concat([df5_w, df5_nw])
+df5['model'] = pd.Categorical(df5['model'], categories=[f"{best_model_str} Weighted", "Total_DON (intact)\n1st_Der Non-Weighted"])
+
 #------- Generate and Print Plots -------#
 
 comp_list = [
     (df1, "Toxin Effect", "Best Model\n(Weighted)"),
     (df2, "Material Effect", "Best Model\n(Weighted)"),
     (df3, "Preprocessing Effect", "Best Model\n(Weighted)"),
-    (df4, "Weighting Effect", "Best Model\n(Weighted)")
+    (df4, "Weighting Effect", "Best Model\n(Weighted)"),
+    (df5, "Weighting Effect (Best vs Best)", "Best Model\n(Weighted)")
 ]
 
 p_comp = {}
@@ -129,6 +165,6 @@ for df_plot, title, ref in comp_list:
          + theme(axis_text_x=element_text(), figure_size=(8, 5))
     )
 
-# Export the comparison plots
-for title, plot in p_comp.items():
-    plot.save(f"./figures/PLS_DA/{title.replace(' ', '_').lower()}_comparison_boxplot.svg", width=8, height=5, dpi=300)
+#export the comparison plots
+for key, plot in p_comp.items():
+    plot.save(f"./figures/PLS_DA/{key.replace(' ', '_').lower()}_comparison_boxplot.svg", width=8, height=5, dpi=300)
