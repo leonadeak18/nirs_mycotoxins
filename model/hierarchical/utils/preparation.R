@@ -13,8 +13,7 @@ binary_transform <- function(y, threshold = 1000, targets = c("DON", "Total_DON"
       Class = cls,
       Weight = 1,  # Assign a default weight of 1 for all samples
       row.names = rownames(y)
-    )s
-    names(y_class[[target]]) <- rownames(y)
+    )
   }  
   return(y_class)
 }

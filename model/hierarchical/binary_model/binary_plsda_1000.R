@@ -8,11 +8,6 @@ library(pROC)
 library(PRROC)
 library(plsVarSel)
 
-###################################################################
-#################### TRAINING SET #################################
-###################################################################  
-# Train the data with binary classification (threshold = 1000) with the country determination as a first filter
-
 # Define preprocessing methods
 prep_methods <- list(
   'SNV'     = function(x) savitzkyGolay(standardNormalVariate(x), w = 15, p = 2, m = 0),
