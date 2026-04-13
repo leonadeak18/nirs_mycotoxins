@@ -26,8 +26,8 @@ country_plsda <- function(nirs_data, max_nlv = 25) {
       names(y_test) <- rownames(X_test_raw)
       
       # Apply Spectra Preprocessing
-      X_train_prep <- savitzkyGolay(standardNormalVariate(X_train_raw), w = 15, p = 2, m = 0)
-      X_test_prep  <- savitzkyGolay(standardNormalVariate(X_test_raw), w = 15, p = 2, m = 0)
+      X_train_prep <- savitzkyGolay(X_train_raw, w = 15, p = 2, m = 1)
+      X_test_prep  <- savitzkyGolay(X_test_raw, w = 15, p = 2, m = 1)
       
       # Optimize the nLV through CV with k =10 for 10-times
       res_nlv <- plsr_plsda_allsteps(
@@ -47,7 +47,7 @@ country_plsda <- function(nirs_data, max_nlv = 25) {
                 seed = 270725, 
                 nfolds = 10, 
                 criterion = "err", 
-                selection = "globalmin"
+                selection = "localmin"
       )
       
       # extract the optimum nlv
@@ -131,4 +131,4 @@ country_plsda <- function(nirs_data, max_nlv = 25) {
 
 # --- Execution ---
 country_plsda_results <- country_plsda(nirs_data)
-write.csv(country_plsda_results, "./results/hierarchical/snv_country_plsda_results.csv", row.names = FALSE)
+write.csv(country_plsda_results, "./results/hierarchical/country_local_plsda_results.csv", row.names = FALSE)

@@ -4,11 +4,16 @@ binary_transform <- function(y, threshold = 1000, targets = c("DON", "Total_DON"
   y_class <- list()
   for (target in targets) {
     # Binary classification
-    y_class[[target]] <- cut(
+    cls <- cut(
       y[[target]],
       breaks = c(-Inf, threshold, Inf),
       labels = c("LC", "HC")
     )
+    y_class[[target]] <- data.frame(
+      Class = cls,
+      Weight = 1,  # Assign a default weight of 1 for all samples
+      row.names = rownames(y)
+    )s
     names(y_class[[target]]) <- rownames(y)
   }  
   return(y_class)

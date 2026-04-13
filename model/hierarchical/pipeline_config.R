@@ -53,7 +53,9 @@ load_nirs_data <- function(splits = 10, threshold = 1000,
       
       # Extract country
       train_country[[source]][[i]] <- y_train_raw$Country
+      names(train_country[[source]][[i]]) <- rownames(X_train[[source]][[i]])
       test_country[[source]][[i]]  <- y_test_raw$Country
+      names(test_country[[source]][[i]]) <- rownames(X_test[[source]][[i]])
     }
   }
   
