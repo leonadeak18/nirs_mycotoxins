@@ -65,7 +65,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, max_nlv = 25) {
           X_train_prep <- prep_methods[[prep_name]](X_train_raw)
           X_test_prep  <- prep_methods[[prep_name]](X_test_raw)
           
-          for (varsel_name in varsel-names){
+          for (varsel_name in varsel_names){
             selected_vars <- varsel_methods[[varsel_name]](
               x = X_train_prep, 
               y = as.numeric(y_train), 
