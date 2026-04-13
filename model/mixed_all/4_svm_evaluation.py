@@ -1,5 +1,5 @@
 ##################################
-###### XGBoost evaluation #########
+###### SVM evaluation #########
 ##################################
 import numpy as np
 from scipy.stats import mannwhitneyu, ttest_ind, shapiro
@@ -10,17 +10,28 @@ from plotnine import (ggplot, aes, geom_boxplot, geom_jitter, geom_text,
 #------- Determine the best model by boxplot -------#
 # Importing the datasets
 data = {
-    "weighted": pd.read_csv("./results/mixed_all/weighted_XGBoost_results.csv"),
-    "non_weighted": pd.read_csv("./results/mixed_all/2_XGB_results.csv")
+    "weighted": pd.read_csv("./results/mixed_all/weighted_SVM_results.csv"),
+    "non_weighted": pd.read_csv("./results/mixed_all/2_SVM_results.csv")
 }
+
+# rename the columns "Test_MCC" to "MCC" for consistency
+for key in data.keys():
+    data[key] = data[key].rename(columns={"Test_MCC": "MCC"})
 
 data_top = {}
 for key in data.keys():
     # Create the model label
     data[key]['model'] = data[key]['Target_Toxin'] + " (" + data[key]['Sample_Source'] + ")\n" + data[key]['Preprocessing'] + " \n " + data[key]["Feature_Method"]
     
-    # Determine the Rank order (Best to Worst based on Mean MCC)
-    rank_order = data[key].groupby('model')['Test_MCC'].mean().sort_values(ascending=False).index.tolist()
+    # Group by model to calculate metrics
+    grouped_mcc = data[key].groupby('model')['MCC']
+    
+    # Calculate the score: Mean - Standard Deviation
+    # fillna(0) ensures that if a model only has 1 sample (std = NaN), it doesn't break the sort
+    mcc_score = grouped_mcc.mean() - grouped_mcc.std().fillna(0)
+    
+    # Determine the Rank order (Best to Worst based on Mean - SD)
+    rank_order = mcc_score.sort_values(ascending=False).index.tolist()
     
     # Filter to get the top 5 models
     top_models = rank_order[:5]
@@ -35,7 +46,7 @@ for key in data.keys():
 plots = {}
 for key in data_top.keys():
     plots[key] = (
-        ggplot(data_top[key], aes(x='model', y='Test_MCC', fill='model'))
+        ggplot(data_top[key], aes(x='model', y='MCC', fill='model'))
         + geom_boxplot(show_legend=False, alpha=0.7)
         + geom_jitter(alpha=0.3, width=0.1, size=2, show_legend=False)
         + theme_classic()
@@ -53,12 +64,12 @@ for key in data_top.keys():
 
 # export the plots
 for key, plot in plots.items():
-    plot.save(f"./figures/XGBoost/{key}_xgboost_top_models_boxplot.svg", width=10, height=6, dpi=300)
+    plot.save(f"./figures/SVM/{key}_svm_top_models_boxplot.svg", width=10, height=6, dpi=300)
 
 
 #------- Comparison the best model -------#
-## the best model is the weighted Total_DON in intact with SNV preprocessing, we will compare it with other effects
-best_model_str = "Total_DON (intact)\nSNV"
+## the best model is the weighted Total_DON in intact with RNV_Smoothing preprocessing, we will compare it with other effects
+best_model_str = "Total_DON (intact)\nRNV_Smoothing \n ICA"
 
 # Function to calculate statistical significance with dynamic test selection
 def get_sig_df(df, ref_name, group_col='model', val_col='MCC'):
@@ -109,21 +120,25 @@ def get_sig_df(df, ref_name, group_col='model', val_col='MCC'):
         
     return pd.DataFrame(stats_list)
 
-#------- Define the 4 Comparisons -------#
+#------- Define the 6 Comparisons -------#
 
 # Plot 1: Toxin Effect (Total_DON vs DON)
-df1 = data["weighted"][data["weighted"]['model'].isin([best_model_str, "DON (intact)\nSNV"])].copy()
-df1['model'] = pd.Categorical(df1['model'], categories=[best_model_str, "DON (intact)\nSNV"])
+df1 = data["weighted"][data["weighted"]['model'].isin([best_model_str, "DON (intact)\nRNV_Smoothing \n ICA"])].copy()
+df1['model'] = pd.Categorical(df1['model'], categories=[best_model_str, "DON (intact)\nRNV_Smoothing \n ICA"])
 
 # Plot 2: Sample Source Effect (Intact vs Ground)
-df2 = data["weighted"][data["weighted"]['model'].isin([best_model_str, "Total_DON (ground)\nSNV"])].copy()
-df2['model'] = pd.Categorical(df2['model'], categories=[best_model_str, "Total_DON (ground)\nSNV"])
+df2 = data["weighted"][data["weighted"]['model'].isin([best_model_str, "Total_DON (ground)\nRNV_Smoothing \n ICA"])].copy()
+df2['model'] = pd.Categorical(df2['model'], categories=[best_model_str, "Total_DON (ground)\nRNV_Smoothing \n ICA"])
 
-# Plot 3: Preprocessing Effect (SNV vs the others)
-prep_models = [best_model_str, "Total_DON (intact)\nDetrend_SNV", "Total_DON (intact)\n1st_Der", 
-               "Total_DON (intact)\n2nd_Der", "Total_DON (intact)\nRNV"]
+# Plot 3: Preprocessing Effect (RNV vs the others)
+prep_models = [best_model_str, 
+               "Total_DON (intact)\nSNV_Smoothing \n ICA", 
+               "Total_DON (intact)\n1st_derivative \n ICA", 
+               "Total_DON (intact)\n2nd_derivative \n ICA", 
+               "Total_DON (intact)\nDetrending_SNV \n ICA"]
 df3 = data["weighted"][data["weighted"]['model'].isin(prep_models)].copy()
 df3['model'] = pd.Categorical(df3['model'], categories=prep_models)
+
 
 # Plot 4: Weighting Effect
 df4_w = data["weighted"][data["weighted"]['model'] == best_model_str].copy()
@@ -136,10 +151,22 @@ df4['model'] = pd.Categorical(df4['model'], categories=[f"{best_model_str} Weigh
 # Plot 5: Weighting Effect (the best vs the best models)
 df5_w = data["weighted"][data["weighted"]['model'] == best_model_str].copy()
 df5_w['model'] = f"{best_model_str} Weighted"
-df5_nw = data["non_weighted"][data["non_weighted"]['model'] == "Total_DON (intact)\n1st_Der"].copy()
-df5_nw['model'] = "Total_DON (intact)\n1st_Der Non-Weighted"
+df5_nw = data["non_weighted"][data["non_weighted"]['model'] == "Total_DON (intact)\nRNV_Smoothing \n Factor_Analysis"].copy()
+df5_nw['model'] = "Total_DON (intact)\nRNV_Smoothing \n Factor_Analysis Non-Weighted"
 df5 = pd.concat([df5_w, df5_nw])
-df5['model'] = pd.Categorical(df5['model'], categories=[f"{best_model_str} Weighted", "Total_DON (intact)\n1st_Der Non-Weighted"])
+df5['model'] = pd.Categorical(df5['model'], categories=[f"{best_model_str} Weighted", "Total_DON (intact)\nRNV_Smoothing \n Factor_Analysis Non-Weighted"])
+
+#Plot 6: Effect of Feature Selection (Factor Analysis vs PCA)
+fs_models = [best_model_str, 
+               "Total_DON (intact)\nRNV_Smoothing \n Full_spectra", 
+               "Total_DON (intact)\nRNV_Smoothing \n ANOVA_Percentile", 
+               "Total_DON (intact)\nRNV_Smoothing \n ANOVA_FDR", 
+               "Total_DON (intact)\nRNV_Smoothing \n Factor_Analysis",
+               "Total_DON (intact)\nRNV_Smoothing \n PCA",
+               "Total_DON (intact)\nRNV_Smoothing \n Lasso L1 (Selector)",
+               "Total_DON (intact)\nRNV_Smoothing \n RFE"]
+df6 = data["weighted"][data["weighted"]['model'].isin(fs_models)].copy()
+df6['model'] = pd.Categorical(df6['model'], categories=fs_models)
 
 #------- Generate and Print Plots -------#
 
@@ -148,7 +175,8 @@ comp_list = [
     (df2, "Material Effect", "Best Model\n(Weighted)"),
     (df3, "Preprocessing Effect", "Best Model\n(Weighted)"),
     (df4, "Weighting Effect", "Best Model\n(Weighted)"),
-    (df5, "Weighting Effect (Best vs Best)", "Best Model\n(Weighted)")
+    (df5, "Weighting Effect (Best vs Best)", "Best Model\n(Weighted)"),
+    (df6, "Feature Selection Effect", "Best Model\n(Weighted)")
 ]
 
 p_comp = {}
@@ -162,9 +190,9 @@ for df_plot, title, ref in comp_list:
          + theme_classic()
          + expand_limits(y=df_plot['MCC'].max() + 0.15)
          + labs(title=title, x="", y="Matthews Correlation Coefficient")
-         + theme(axis_text_x=element_text(), figure_size=(8, 5))
+         + theme(axis_text_x=element_text(), figure_size=(9, 5))
     )
 
 #export the comparison plots
 for key, plot in p_comp.items():
-    plot.save(f"./figures/PLS_DA/{key.replace(' ', '_').lower()}_comparison_boxplot.svg", width=8, height=5, dpi=300)
+    plot.save(f"./figures/SVM/{key.replace(' ', '_').lower()}_comparison_boxplot.svg", width=9, height=5, dpi=300)
