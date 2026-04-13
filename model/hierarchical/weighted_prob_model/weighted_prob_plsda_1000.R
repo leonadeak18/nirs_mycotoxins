@@ -7,6 +7,7 @@ library(prospectr)
 library(pROC)
 library(PRROC)
 library(plsVarSel)
+library(spectacles)
 
 # Define preprocessing methods
 prep_methods <- list(
