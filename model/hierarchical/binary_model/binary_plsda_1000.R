@@ -7,6 +7,7 @@ library(prospectr)
 library(pROC)
 library(PRROC)
 library(plsVarSel)
+library(spectacles)
 
 # Define preprocessing methods
 prep_methods <- list(
@@ -203,4 +204,4 @@ pipeline_hierarchical_binary <- function(nirs_data, max_nlv = 25) {
 
 # --- Execution ---
 binary_plsda_results <- pipeline_hierarchical_binary(nirs_data)
-write.csv(binary_plsda_results, "./results/hierarchical/2_plsda_1000_results.csv", row.names = FALSE)s
+write.csv(binary_plsda_results, "./results/hierarchical/2_plsda_1000_results.csv", row.names = FALSE)
