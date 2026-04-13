@@ -40,6 +40,11 @@ for source in sources:
     y3[source] = {}
     y3[source] = three_level_transform(y[source][['DON','Total_DON']])
 
+y1250 = {}
+for source in sources:
+    y1250[source] = {}
+    y1250[source] = binary_transform(y[source][['DON', 'Total_DON']], threshold=1250)
+
 
 ####################################################
 # Preprocessing and plotting the spectra
@@ -314,6 +319,43 @@ bar_plot3 = (
 bar_plot3.save("./figures/preprocessing/target_distribution_bar_plot3.svg", dpi=600)
 
 
+### bar chart for 1250 threshold distribution
+target_distribution1250 = {}
+for source in sources:
+    target_distribution1250[source] = {}
+    for target in targets:
+        target_distribution1250[source][target] = y1250[source][target].value_counts().reset_index()
+        target_distribution1250[source][target].columns = ['Category', 'Count']
+        target_distribution1250[source][target]['Source'] = source
+        target_distribution1250[source][target]['Target'] = target
+target_distribution1250_df = pd.concat([df for source in target_distribution1250.values() for df in source.values()], ignore_index=True)
+
+## select the data
+DON_1000 = target_distribution_df.iloc[[0,1,4,5]]
+DON_1000["ID"] = "DON_1000"
+Total_DON_1000 = target_distribution_df.iloc[[2,3,6,7]]
+Total_DON_1000["ID"] = "Total_DON_1000"
+Total_DON_1250 = target_distribution1250_df.iloc[[2,3,6,7]]
+Total_DON_1250["ID"] = "Total_DON_1250"
+combined_distribution = pd.concat([DON_1000, Total_DON_1000, Total_DON_1250], ignore_index=True)
+from plotnine import *
+bar_plot1250 = (
+    ggplot(combined_distribution, aes(x='Source', y='Count', fill='Category')) +
+    geom_bar(stat='identity', position='dodge') +
+    geom_text(aes(label='Count'), position=position_dodge(width=0.9), va='bottom', size=8) +
+    facet_wrap('~ID') +
+    labs(title='Distribution of DON and Total DON', x='Source', y='Count') +
+    theme_classic() +
+    scale_y_continuous(limits=(0, 350)) +
+    scale_fill_manual(values=['#70c8e2', '#e54b2c']) +
+    theme(
+        title=element_text(size=12),
+        axis_title=element_text(size=10),
+        legend_position="right"
+    )
+)
+bar_plot1250.show()
+bar_plot1250.save("./figures/preprocessing/target_distribution_bar_plot1250.svg", dpi=600)
 
 ##################################################
 ######## PCA analysis of the  spectra ############
