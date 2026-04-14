@@ -4,3 +4,97 @@ format: html
 ---
 
 # Hierarchical PLS_DA Evaluation
+
+```{r}
+## Import all results
+initial_data <- list(
+    "binary_1000" = read.csv("results/hierarchical/2_plsda_1000_results.csv"),
+    "binary_1250" = read.csv("results/hierarchical/2_plsda_1250_results.csv"),
+    "weighted_1000" = read.csv("results/hierarchical/weighted_triangle_plsda_1000_results.csv"),
+    "weighted_1250" = read.csv("results/hierarchical/weighted_triangle_plsda_1250_results.csv")
+)
+
+# remove all column except 1 - 5 and 15
+data <- lapply(initial_data, function(df) df[, c(1:5, 15)])
+
+# remove Total_DON data on 1000 dataframes
+data$binary_1000 <- data$binary_1000[data$binary_1000$Target_toxin != "Total_DON", ]
+data$weighted_1000 <- data$weighted_1000[data$weighted_1000$Target_toxin != "Total_DON", ]
+
+# add details about the sample_weight
+data$binary_1000$Sample_weight <- "None"
+data$binary_1250$Sample_weight <- "None"
+data$weighted_1000$Sample_weight <- "Weighted"
+data$weighted_1250$Sample_weight <- "Weighted"
+
+# combine all dataframes into one
+combined_data <- do.call(rbind, data)
+
+#remove the second derivative data
+combined_data <- combined_data[combined_data$Preprocessing != "2nd_Der", ]
+str(combined_data)
+
+# except MCC transform all to factor
+combined_data[c(1:5, 7)] <- lapply(combined_data[c(1:5, 7)], as.factor)
+str(combined_data)
+
+# Apply Fisher transformation to MCC
+combined_data$MCC_z <- atanh(combined_data$MCC)
+
+
+```
+
+## Analysis using Linear mixed-effects
+This experiment is performed using Randomized Complete Block Design (RCBD) with 6 factors: Sample_weight, Target_toxin, Preprocessing, Variable_Selection and Sample_weight. The response variable is MCC_z.
+
+```{r}
+library(lme4)
+library(lmerTest)
+library(emmeans)
+# Fit the linear mixed-effects model
+model <- lmer(MCC ~ (Sample_source + Target_toxin + Preprocessing + Variable_Selection + Sample_weight)^2 + (1|Split), data = combined_data)
+anova(model)
+
+#select the best pipelines
+best_pipelines <- emmeans(model, pairwise ~ Sample_source * Target_toxin * Preprocessing * Variable_Selection * Sample_weight)
+best_pipelines_df <- as.data.frame(best_pipelines$emmeans)
+best_pipelines_df <- best_pipelines_df[order(-best_pipelines_df$emmean), ]
+best_pipelines_df <- best_pipelines_df[1:10, ]
+```
+
+## Linear mixed-effects, but using balanced_accuracy instead of MCC as response variable
+
+```{r}
+# remove all column except 1 - 5 and balanced_accuracy
+data2 <- lapply(initial_data, function(df){
+    df$balanced_accuracy <- (df$Sensitivity + df$Specitifity) / 2
+    df[, c(names(df)[1:5], "balanced_accuracy"), drop = FALSE]
+})
+
+# add details about the sample_weight
+data2$binary_1000$Sample_weight <- "None"
+data2$binary_1250$Sample_weight <- "None"
+data2$weighted_1000$Sample_weight <- "Weighted"
+data2$weighted_1250$Sample_weight <- "Weighted"
+
+# combine all dataframes into one
+combined_data2 <- do.call(rbind, data2)
+
+#remove the second derivative data
+combined_data2 <- combined_data2[combined_data2$Preprocessing != "2nd_Der", ]
+str(combined_data2)
+
+# except MCC transform all to factor
+combined_data2[c(1:5, 7)] <- lapply(combined_data2[c(1:5, 7)], as.factor)
+str(combined_data2)
+
+# Fit the linear mixed-effects model
+model2 <- lmer(balanced_accuracy ~ (Sample_source + Target_toxin + Preprocessing + Variable_Selection + Sample_weight)^2 + (1|Split), data = combined_data2)
+anova(model2)
+
+#select the best pipelines
+best_pipelines2 <- emmeans(model2, pairwise ~ Sample_source * Target_toxin * Preprocessing * Variable_Selection * Sample_weight)
+best_pipelines2_df <- as.data.frame(best_pipelines2$emmeans)
+best_pipelines2_df <- best_pipelines2_df[order(-best_pipelines2_df$emmean), ]
+best_pipelines2_df <- best_pipelines2_df[1:10, ]
+```
