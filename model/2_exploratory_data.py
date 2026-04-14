@@ -40,6 +40,11 @@ for source in sources:
     y3[source] = {}
     y3[source] = three_level_transform(y[source][['DON','Total_DON']])
 
+y1250 = {}
+for source in sources:
+    y1250[source] = {}
+    y1250[source] = binary_transform(y[source][['DON', 'Total_DON']], threshold=1250)
+
 
 ####################################################
 # Preprocessing and plotting the spectra
@@ -48,16 +53,16 @@ for source in sources:
 import chemotools.scatter as ch
 from sklearn.pipeline import Pipeline
 from chemotools.derivative import SavitzkyGolay
+from chemotools.baseline import PolynomialCorrection
 preprocessing_pipelines = {
     "Raw": None,
     "SNV_Smoothing": Pipeline([
         ('snv', ch.StandardNormalVariate()),
         ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
     ]),
-    "EMSC_Smoothing": Pipeline([
-        ('emsc', ch.ExtendedMultiplicativeScatterCorrection()),
-        ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv = 0))
-    ]),
+    "Detrending_SNV": Pipeline([
+        ('detrending', PolynomialCorrection(order = 2)), 
+        ('snv', ch.StandardNormalVariate()), ('smoothing', SavitzkyGolay(window_length=15, polyorder=2, deriv=0))]),
     "1st_derivative": Pipeline([
         ('first_derivative', SavitzkyGolay(window_length=15, polyorder=2, deriv = 1))
     ]),
@@ -104,7 +109,7 @@ spectra_plot['intact']['1st_derivative'].show()
 from plotnine import *
 grid_spectra = {}
 for material in spectra_plot.keys():
-    grid_spectra[material] = (spectra_plot[material]['Raw']|spectra_plot[material]['SNV_Smoothing']|spectra_plot[material]['EMSC_Smoothing'])/(spectra_plot[material]['1st_derivative']|spectra_plot[material]['2nd_derivative']|spectra_plot[material]['RNV_Smoothing'])
+    grid_spectra[material] = (spectra_plot[material]['Raw']|spectra_plot[material]['SNV_Smoothing']|spectra_plot[material]['Detrending_SNV'])/(spectra_plot[material]['1st_derivative']|spectra_plot[material]['2nd_derivative']|spectra_plot[material]['RNV_Smoothing'])
     grid_spectra[material] = grid_spectra[material] + theme(figure_size=(24, 10))
     grid_spectra[material].save(f"./figures/preprocessing/all_spectra_grid_{material}.svg", dpi=600)
 print("All grid plots saved successfully.")
@@ -156,7 +161,7 @@ for material, preps in formatted_train_with_country.items():
     
     # B. Assemble and save the grid for this material & target
     p = spectra_plots_country[material]
-    grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+    grid = (p['Raw'] | p['SNV_Smoothing'] | p['Detrending_SNV']) / \
             (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
     
     grid = grid + theme(figure_size=(24, 10))
@@ -179,7 +184,7 @@ for material, preps in formatted_train_with_country.items():
     
     # B. Assemble and save the grid for this material & target
     p = spectra_plots_year[material]
-    grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+    grid = (p['Raw'] | p['SNV_Smoothing'] | p['Detrending_SNV']) / \
             (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
     grid = grid + theme(figure_size=(24, 10))
     grid.save(f"./figures/preprocessing/year_all_spectra_grid_{material}.svg", dpi=600)
@@ -214,7 +219,7 @@ for target in targets:
         
         # B. Assemble and save the grid for this material & target
         p = spectra_plots[target][material]
-        grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+        grid = (p['Raw'] | p['SNV_Smoothing'] | p['Detrending_SNV']) / \
                (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
         
         grid = grid + theme(figure_size=(24, 10))
@@ -250,7 +255,7 @@ for target in targets:
         
         # B. Assemble and save the grid for this material & target
         p = spectra_plots3[target][material]
-        grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+        grid = (p['Raw'] | p['SNV_Smoothing'] | p['Detrending_SNV']) / \
                (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
         
         grid = grid + theme(figure_size=(24, 10))
@@ -314,6 +319,43 @@ bar_plot3 = (
 bar_plot3.save("./figures/preprocessing/target_distribution_bar_plot3.svg", dpi=600)
 
 
+### bar chart for 1250 threshold distribution
+target_distribution1250 = {}
+for source in sources:
+    target_distribution1250[source] = {}
+    for target in targets:
+        target_distribution1250[source][target] = y1250[source][target].value_counts().reset_index()
+        target_distribution1250[source][target].columns = ['Category', 'Count']
+        target_distribution1250[source][target]['Source'] = source
+        target_distribution1250[source][target]['Target'] = target
+target_distribution1250_df = pd.concat([df for source in target_distribution1250.values() for df in source.values()], ignore_index=True)
+
+## select the data
+DON_1000 = target_distribution_df.iloc[[0,1,4,5]]
+DON_1000["ID"] = "DON_1000"
+Total_DON_1000 = target_distribution_df.iloc[[2,3,6,7]]
+Total_DON_1000["ID"] = "Total_DON_1000"
+Total_DON_1250 = target_distribution1250_df.iloc[[2,3,6,7]]
+Total_DON_1250["ID"] = "Total_DON_1250"
+combined_distribution = pd.concat([DON_1000, Total_DON_1000, Total_DON_1250], ignore_index=True)
+from plotnine import *
+bar_plot1250 = (
+    ggplot(combined_distribution, aes(x='Source', y='Count', fill='Category')) +
+    geom_bar(stat='identity', position='dodge') +
+    geom_text(aes(label='Count'), position=position_dodge(width=0.9), va='bottom', size=8) +
+    facet_wrap('~ID') +
+    labs(title='Distribution of DON and Total DON', x='Source', y='Count') +
+    theme_classic() +
+    scale_y_continuous(limits=(0, 350)) +
+    scale_fill_manual(values=['#70c8e2', '#e54b2c']) +
+    theme(
+        title=element_text(size=12),
+        axis_title=element_text(size=10),
+        legend_position="right"
+    )
+)
+bar_plot1250.show()
+bar_plot1250.save("./figures/preprocessing/target_distribution_bar_plot1250.svg", dpi=600)
 
 ##################################################
 ######## PCA analysis of the  spectra ############
@@ -361,7 +403,7 @@ for target in targets:
         
         #assemble and save the grid for this material & target
         p = pca_plots[target][material]
-        grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+        grid = (p['Raw'] | p['SNV_Smoothing'] | p['Detrending_SNV']) / \
                (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
         grid = grid + theme(figure_size=(24, 10))
         grid.save(f"./figures/PCA/pca_grid_{material}_{target}.svg", dpi=600)
@@ -374,7 +416,7 @@ for target in targets:
         
         #assemble and save the grid for this material & target
         p = pca_plots[target][material]
-        grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+        grid = (p['Raw'] | p['SNV_Smoothing'] | p['Detrending_SNV']) / \
                (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
         grid = grid + theme(figure_size=(24, 10))
         grid.save(f"./figures/PCA/pca_grid_{material}_{target}_3_category.svg", dpi=600)
@@ -389,7 +431,7 @@ for material in pca_country.keys():
     
     #assemble and save the grid for this material & target
     p = pca_country_plot[material]
-    grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+    grid = (p['Raw'] | p['SNV_Smoothing'] | p['Detrending_SNV']) / \
             (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
     grid = grid + theme(figure_size=(24, 10))
     grid.save(f"./figures/PCA/country_pca_grid_{material}_category.svg", dpi=600)
@@ -403,7 +445,113 @@ for material in pca_country.keys():
     
     #assemble and save the grid for this material & target
     p = pca_year[material]
-    grid = (p['Raw'] | p['SNV_Smoothing'] | p['EMSC_Smoothing']) / \
+    grid = (p['Raw'] | p['SNV_Smoothing'] | p['Detrending_SNV']) / \
             (p['1st_derivative'] | p['2nd_derivative'] | p['RNV_Smoothing'])
     grid = grid + theme(figure_size=(24, 10))
     grid.save(f"./figures/PCA/year_pca_grid_{material}_category.svg", dpi=600)
+
+
+########################################################
+######## Characterize the test set #####################
+########################################################
+char_test = {}
+for source in sources:
+    char_test[source] = {}
+    for i in range(10):
+        #import the Sample_ID of test set
+        test_sample_id = pd.read_csv(f'./nirs/train_test_set/y_test_{source}_split_{i}.csv')
+        char_test[source][i] = test_sample_id.iloc[:, 0]
+
+
+pca_country_test = {}
+for source in sources:
+    pca_country_test[source] = {}
+    for i in range(10):
+
+        # indices of test samples
+        test_idx = char_test[source][i]
+
+        # create a copy so we don't overwrite original data
+        df = pca_country[source]['SNV_Smoothing'].copy()
+
+        # boolean column: True if index is in test_idx
+        df["Test_Set"] = df.index.isin(test_idx)
+
+        pca_country_test[source][i] = df
+
+## Plotting the PCA with test samples highlighted
+from utils.plotting import plot_pca2
+from plotnine.patchwork import plot_annotation
+pca_test_plots = {}
+for source in sources:
+    pca_test_plots[source] = {}
+    for i in range(10):
+        print(f"Plotting PCA for {source} - Split {i} with test samples highlighted")
+        pca_test_plots[source][i] = plot_pca2(
+            pca_country_test[source][i], 
+            variance_explained=pca_df_variance_explained[source]['SNV_Smoothing'], 
+            title=f"PCA of SNV - Split {i+1}", 
+            color_var='Test_Set',
+            shape_var='Country'
+        ) + theme(legend_position="none")
+    
+    #assemble and save the grid for this material & target
+    p = pca_test_plots[source]
+    legend = pca_test_plots[source][0]._legend
+    grid = (p[0] | p[1] | p[2] | p[3] | p[4]) / \
+            (p[5] | p[6] | p[7] | p[8] | p[9])
+    grid = grid + theme(figure_size=(24, 10))
+    grid.save(f"./figures/PCA/test_set_pca_grid_{source}_category.svg", dpi=600)
+
+            
+import matplotlib.pyplot as plt
+from plotnine import theme, element_blank
+
+pca_test_plots = {}
+for source in sources:
+    pca_test_plots[source] = {}
+    
+    for i in range(10):
+        print(f"Plotting PCA for {source} - Split {i} with test samples highlighted")
+        
+        p = plot_pca2(
+            pca_country_test[source][i],
+            variance_explained=pca_df_variance_explained[source]['SNV_Smoothing'],
+            title=f"Split {i+1}",
+            color_var='Test_Set',
+            shape_var='Country'
+        )
+        
+        # Attach a floating, horizontal legend ONLY to the middle plot of the top row (Index 2).
+        if i == 2:
+            p = p + theme(
+                # (0.5, y) keeps it centered horizontally over p[2]. 
+                # A y-value > 1 pushes it UP outside the plot boundaries.
+                legend_position=(0.8, 1.25), 
+                legend_direction='horizontal'
+            )
+        else:
+            p = p + theme(legend_position="none")
+            
+        pca_test_plots[source][i] = p
+
+    # Assemble the grid
+    p_list = pca_test_plots[source]
+    grid = (p_list[0] | p_list[1] | p_list[2] | p_list[3] | p_list[4]) / \
+           (p_list[5] | p_list[6] | p_list[7] | p_list[8] | p_list[9])
+           
+    grid = grid + theme(figure_size=(24, 10))
+    
+    # Extract the Matplotlib Figure
+    fig = grid.draw()
+    
+    # --- MATPLOTLIB FORMATTING ---
+    # 1. Push all the plots down to create a 15% blank gap at the top of the canvas
+    fig.subplots_adjust(top=0.85)
+    
+    # 2. Add the Global Title near the very top of the canvas (above the floating legend)
+    fig.suptitle(f"PCA of SNV across Splits - {source}", fontsize=20, fontweight='bold', y=1.1)
+    
+    # Save the figure
+    fig.savefig(f"./figures/PCA/test_set_pca_grid_{source}_category.svg", dpi=600, bbox_inches='tight')
+    plt.close(fig)

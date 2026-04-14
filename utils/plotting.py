@@ -79,6 +79,28 @@ def plot_pca(pca_df, variance_explained, title, color_var):
 
     return output
 
+## PCA plotting function
+def plot_pca2(pca_df, variance_explained, title, color_var, shape_var):
+    num_categories = pca_df[color_var].nunique()
+    base_plot = (
+        ggplot(pca_df, aes(x='PC1', y='PC2', color=color_var, shape = shape_var)) +
+        geom_point(size=3) +
+        labs(x=f"PC1 ({variance_explained[0]*100:.2f}%)", y=f"PC2 ({variance_explained[1]*100:.2f}%)", title=title) +
+        theme_classic() +
+        theme(
+            title=element_text(size=12),
+            axis_title=element_text(size=10)
+            )
+        )
+    if num_categories == 2:
+        output = base_plot + scale_color_manual(values=['#70c8e2', '#e54b2c']) + theme(legend_position = "right")
+    elif num_categories == 3:
+        output = base_plot + scale_color_manual(values=['#70c8e2', 'black', '#e54b2c']) + theme(legend_position = "right")
+    else:
+        output = base_plot + scale_color_cmap_d(cmap_name="viridis_r") + theme(legend_position = "none")
+
+    return output
+
 ## Distribution of CV Probability Thresholds
 def plot_threshold_distribution(df, title):
     # create a long format dataframe for plotting
