@@ -9,6 +9,7 @@
 
 from plotnine import geom_text
 import pandas as pd
+import numpy as np
 # Define the scopes
 sources = ['intact', 'ground']
 targets = ['DON', 'Total_DON']
@@ -356,6 +357,91 @@ bar_plot1250 = (
 )
 bar_plot1250.show()
 bar_plot1250.save("./figures/preprocessing/target_distribution_bar_plot1250.svg", dpi=600)
+
+
+############# Distribution by country ##############
+target_distribution_c1000 = {}
+
+for source in sources:
+    target_distribution_c1000[source] = {}
+    
+    for target in targets:
+        df = pd.DataFrame({
+            "Category": y2[source][target],
+            "Country": y[source]["Country"]
+        })
+
+        # Group by Category + Country
+        counts = (
+            df.groupby(["Category", "Country"])
+              .size()
+              .reset_index(name="Count")
+        )
+
+        counts["Source"] = source
+        counts["Target"] = target
+
+        target_distribution_c1000[source][target] = counts
+
+# Combine everything into one DataFrame for plotting
+target_distribution_c1000_df = pd.concat(
+    [df for source in target_distribution_c1000.values() for df in source.values()],
+    ignore_index=True
+)
+
+target_distribution_c1250 = {}
+
+for source in sources:
+    target_distribution_c1250[source] = {}
+    
+    for target in targets:
+        df = pd.DataFrame({
+            "Category": y1250[source][target],
+            "Country": y[source]["Country"]
+        })
+
+        # Group by Category + Country
+        counts = (
+            df.groupby(["Category", "Country"])
+              .size()
+              .reset_index(name="Count")
+        )
+
+        counts["Source"] = source
+        counts["Target"] = target
+
+        target_distribution_c1250[source][target] = counts
+
+# Combine everything into one DataFrame for plotting
+target_distribution_c1250_df = pd.concat(
+    [df for source in target_distribution_c1250.values() for df in source.values()],
+    ignore_index=True
+)
+
+## Plotting the distribution by country
+DON_1000 = target_distribution_c1000_df.iloc[np.r_[0:4, 8:12]]
+DON_1000["ID"] = "DON_1000"
+Total_DON_1250 = target_distribution_c1250_df.iloc[np.r_[4:8, 12:16]]
+Total_DON_1250["ID"] = "Total_DON_1250"
+combined_distribution = pd.concat([DON_1000, Total_DON_1250], ignore_index=True)
+from plotnine import *
+bar_plot_country = (
+    ggplot(combined_distribution, aes(x='Source', y='Count', fill='Category')) +
+    geom_bar(stat='identity', position='dodge') +
+    geom_text(aes(label='Count'), position=position_dodge(width=0.9), va='bottom', size=8) +
+    facet_wrap('~ID + Country') +
+    labs(title='Distribution of DON and Total DON', subtitle='after outlier removal', x='Material', y='Number of Samples') +
+    theme_classic() +
+    scale_y_continuous(limits=(0, 350)) +
+    scale_fill_manual(values=['#70c8e2', '#e54b2c']) +
+    theme(
+        title=element_text(size=12),
+        axis_title=element_text(size=10),
+        legend_position="right"
+    )
+)
+bar_plot_country.show()
+bar_plot_country.save("./figures/preprocessing/target_distribution_bar_plot_country.svg", dpi=600)
 
 ##################################################
 ######## PCA analysis of the  spectra ############

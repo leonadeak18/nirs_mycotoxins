@@ -152,6 +152,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, max_nlv = 25) {
               Sample_source = material,
               Target_toxin = toxin,
               Preprocessing = prep_name,
+              Variable_Selection = varsel_name,
               Split = i,
               LV = opt_idx,
               Err_CV = round(error_cv, 4),

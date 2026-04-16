@@ -41,7 +41,14 @@ str(combined_data)
 # Apply Fisher transformation to MCC
 combined_data$MCC_z <- atanh(combined_data$MCC)
 
-
+#rename the columns
+library(dplyr)
+lme_data <- combined_data %>%
+ rename(
+   Material = Sample_source,
+   Toxin = Target_toxin,
+   Weighting = Sample_weight
+ )
 ```
 
 ## Analysis using Linear mixed-effects
@@ -51,16 +58,31 @@ This experiment is performed using Randomized Complete Block Design (RCBD) with 
 library(lme4)
 library(lmerTest)
 library(emmeans)
-# Fit the linear mixed-effects model
-model <- lmer(MCC ~ (Sample_source + Target_toxin + Preprocessing + Variable_Selection + Sample_weight)^2 + (1|Split), data = combined_data)
+# Fit the linear mixed-effects model until three-way interaction
+model <- lmer(MCC_z ~ (Material + Toxin + Preprocessing + Variable_Selection + Weighting)^3 + (1|Split), data = lme_data)
 anova(model)
 
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model)
+r2(model)
+
+
+summary(model)
+print(model, correlation = TRUE)
+library(sjPlot)
+tab_model(model)
+
 #select the best pipelines
-best_pipelines <- emmeans(model, pairwise ~ Sample_source * Target_toxin * Preprocessing * Variable_Selection * Sample_weight)
+best_pipelines <- emmeans(model, pairwise ~ Material * Toxin * Preprocessing * Variable_Selection * Weighting)
 best_pipelines_df <- as.data.frame(best_pipelines$emmeans)
 best_pipelines_df <- best_pipelines_df[order(-best_pipelines_df$emmean), ]
 best_pipelines_df <- best_pipelines_df[1:10, ]
+#conclusion: the best pipeline is the one with the highest emmean value
+head(best_pipelines_df)
 ```
+
+## Plot
 
 ## Linear mixed-effects, but using balanced_accuracy instead of MCC as response variable
 
@@ -97,4 +119,189 @@ best_pipelines2 <- emmeans(model2, pairwise ~ Sample_source * Target_toxin * Pre
 best_pipelines2_df <- as.data.frame(best_pipelines2$emmeans)
 best_pipelines2_df <- best_pipelines2_df[order(-best_pipelines2_df$emmean), ]
 best_pipelines2_df <- best_pipelines2_df[1:10, ]
+```
+
+
+### Physical Effect of Sample Source
+```{r}
+library(ggpubr)
+
+# Find the maximum MCC to know where to draw the bracket
+max_y <- max(combined_data$MCC, na.rm = TRUE)
+
+# 1. Build the clean, publication-ready violin + boxplot in one command
+material_plot <- ggviolin(
+                    combined_data, 
+                    x = "Sample_source", 
+                    y = "MCC", 
+                    fill = "Sample_source",
+                    palette = c("#fde725", "#440154"),
+                    add = "boxplot",
+                    add.params = list(fill = "white", width = 0.15), 
+                    trim = FALSE,
+                    legend = "none",
+                    title = "Material Effect on Model Performance",
+                    subtitle = "Distribution of 960 algorithmic runs across 10 test splits",
+                    xlab = "Type of Wheat Material",
+                    ylab = "Matthew Correlation Coefficient"
+                    ) +
+                stat_summary(fun = mean, geom = "point", shape = 23, size = 4, fill = "black") +
+  
+                # The significance comes from ANOVA type III with Satterthwaite's method
+                geom_bracket(
+                    xmin = "ground", 
+                    xmax = "intact",
+                    y.position = max_y + 0.2,
+                    label = "***",
+                    tip.length = 0.03,
+                    label.size = 8,
+                    vjust = 0.5
+                ) +
+                theme(plot.title = element_text(face = "bold"))
+ggsave("./figures/PLS_DA/material_plot.svg", plot = material_plot, width = 10, height = 5, units = "in", dpi =600)
+```
+
+```{r}
+library(emmeans)
+library(ggplot2)
+
+# 1. Extract the means of preprocessing, weighting and toxin interaction
+emm_toxin <- emmeans(model, ~ Preprocessing * Weighting * Toxin)
+toxin_df <- as.data.frame(emm_toxin)
+
+# 2. Build the Faceted Plot
+prep_toxin_weight_plot <-ggplot(toxin_df, aes(x = Preprocessing, y = emmean, 
+                     color = Weighting, group = Weighting)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), 
+                width = 0.1, linewidth = 0.4) +
+  
+  # THIS IS THE MAGIC LINE: It splits the plot into two clean panels
+  facet_wrap(~ Toxin) + 
+  
+  theme_classic(base_size = 14) +
+  scale_color_manual(values = c("Weighted" = "#e74c3c", "None" = "#34495e")) +
+  labs(
+    title = "Model Performance Across Toxin Targets",
+    subtitle = "Interaction of Preprocessing and Sample Weighting",
+    x = "Spectral Preprocessing Method",
+    y = "emmean of MCC",
+    color = NULL
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "top",
+    strip.background = element_rect(fill = "#f8f9fa"), # Colors the facet headers
+    strip.text = element_text(face = "bold", size = 12)
+  )
+prep_toxin_weight_plot
+ggsave("./figures/PLS_DA/prep_toxin_weight_plot.svg", plot = prep_toxin_weight_plot, width = 10, height = 5, units = "in", dpi =600)
+```
+
+## Cross-Label between DON and Total DON
+```{r}
+#import the dataset
+library(readxl)
+label <- read_excel("./nirs/nirs_intact.xlsx")[, c(1,3,9,13)]
+label$Cross <- ifelse(label$Deoxynivalenol > 1000 & label$`Total DON` < 1250, "Cross-Negative",
+                ifelse(label$Deoxynivalenol < 1000 & label$`Total DON` > 1250, "Cross-Positive", "None"))
+# remove the none data
+label <- label[label$Cross != "None", ]
+
+# set as factor
+label[,c(1, 2, 5)] <- lapply(label[, c(1, 2, 5)], as.factor)
+str(label)
+
+#melt the data for plotting
+library(reshape2)
+label_melt <- melt(label, id.vars = c("Sample_ID", "Cross"), measure.vars = c("Deoxynivalenol", "Total DON"), variable.name = "Toxin", value.name = "Concentration")
+
+library(ggplot2)
+library(ggpubr)
+
+cross_label_plot <- ggplot(label_melt, aes(x = Sample_ID, y = Concentration, color = Cross, shape = Toxin)) +
+                    # 1. Draw the 50% error bars first (so they sit cleanly behind the points)
+                    geom_errorbar(
+                        aes(ymin = Concentration * 0.5, ymax = Concentration * 1.5),
+                        width = 0.3,                            
+                        linewidth = 0.4,
+                        position = position_dodge(width = 0.6)  
+                    ) +
+                    
+                    # 2. Draw the actual measurement as a large, bold point
+                    geom_point(
+                        position = position_dodge(width = 0.6), 
+                        size = 4, 
+                        alpha = 0.9
+                    ) +
+                    
+                    # 3. Add the regulatory thresholds
+                    geom_hline(yintercept = 1000, linetype = "dashed", color = "#c0392b", linewidth = 0.8) +
+                    geom_hline(yintercept = 1250, linetype = "dashed", color = "#2980b9", linewidth = 0.8) +
+                    
+                    # 4. Apply ggpubr's pristine academic theme
+                    theme_pubr(base_size = 14) +
+                    
+                    # 5. Clean labeling
+                    labs(
+                        title = "Cross-label between Deoxynivalenol and Total DON",
+                        x = "Sample ID",
+                        y = "Concentration (ppb)",
+                        color = NULL,
+                        shape = NULL
+                    ) +
+                    scale_y_continuous(limits = c(300, 2300), breaks = seq(0, 2500, 500)) +
+                    # 6. Formatting tweaks for readability
+                    theme(
+                        plot.title = element_text(face = "bold"),
+                        axis.text.x = element_text(angle = 45, hjust = 1),
+                        legend.position = "top"
+                    )
+ggsave("./figures/PLS_DA/cross_label_plot.svg", plot = cross_label_plot, width = 12, height = 6, units = "in", dpi =600)                    
+```
+## Comparison with mixed dataset model
+
+```{r}
+#import the mixed dataset model results
+mixed_data <- list(
+    "binary_1000" = read.csv("results/mixed_all/2_plsda_results.csv"),
+    "binary_1250" = read.csv("results/mixed_all/2_plsda_results_1250.csv"),
+    "weighted_1000" = read.csv("results/mixed_all/mix_weighted_triangle_plsda_result_1000.csv"),
+    "weighted_1250" = read.csv("results/mixed_all/mix_weighted_triangle_plsda_results_1250.csv")
+)
+# remove all column except 1 - 5 and 16
+mixed_data <- lapply(mixed_data, function(df) df[, c(1:5, 16)])
+
+# remove Total_DON data on 1000 dataframes and DON data on 1250 dataframes
+mixed_data$binary_1000 <- mixed_data$binary_1000[mixed_data$binary_1000$Target_toxin != "Total_DON", ]
+mixed_data$weighted_1000 <- mixed_data$weighted_1000[mixed_data$weighted_1000$Target_toxin != "Total_DON", ]
+
+# add details about the sample_weight
+mixed_data$binary_1000$Sample_weight <- "None"
+mixed_data$binary_1250$Sample_weight <- "None"
+mixed_data$weighted_1000$Sample_weight <- "Weighted"
+mixed_data$weighted_1250$Sample_weight <- "Weighted"
+
+# combine all dataframes into one
+combined_data_mix <- do.call(rbind, mixed_data)
+
+#remove the second derivative data
+combined_data_mix <- combined_data_mix[combined_data_mix$Preprocessing != "2nd_Der", ]
+combined_data_mix$algorithm <- "Mixed"
+combined_data_mix$MCC_z <- atanh(combined_data_mix$MCC)
+
+combined_data_hierarchical <- combined_data
+combined_data_hierarchical$algorithm <- "Hierarchical"
+# combine the two datasets
+combined_data_all <- rbind(combined_data_mix, combined_data_hierarchical)
+combined_data_all[c(1:5, 7:8)] <- lapply(combined_data_all[c(1:5, 7:8)], as.factor)
+
+library(lme4)
+library(lmerTest)
+library(emmeans)
+# Fit the linear mixed-effects model
+model3 <- lmer(MCC_z ~ (Sample_source + Target_toxin + Preprocessing + Variable_Selection + algorithm + Sample_weight)^3 + (1|Split), data = combined_data_all)
+anova(model3)
+
 ```

@@ -14,7 +14,6 @@ prep_methods <- list(
   'SNV'     = function(x) savitzkyGolay(standardNormalVariate(x), w = 15, p = 2, m = 0),
   'Detrend_SNV' = function(x) savitzkyGolay(detrend(x, wav = as.numeric(colnames(x))), w = 15, p = 2, m = 0),
   '1st_Der' = function(x) savitzkyGolay(x, w = 15, p = 2, m = 1),
-  '2nd_Der' = function(x) savitzkyGolay(x, w = 15, p = 2, m = 2),
   "RNV"     = function(x) savitzkyGolay(rnv(x, r = 0.25), w = 15, p = 2, m = 0)
 )
 
