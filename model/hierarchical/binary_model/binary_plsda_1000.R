@@ -60,7 +60,7 @@ pipeline_hierarchical_binary <- function(nirs_data, max_nlv = 25) {
       X_test_L1  <- prep_methods[["1st_Der"]](X_test_full_raw)
       
       mod_country <- rchemo::plsrda(X = X_train_L1, y = y_country_f, nlv = 10)
-      pred_country_test <- predict(mod_country, newdata = X_test_L1)$pred
+      pred_country_test <- predict(mod_country, X = X_test_L1)$pred
       
       # ==========================================
       # PHASE 2: LEVEL 2 MODELS (DON CLASSIFICATION)
@@ -121,7 +121,7 @@ pipeline_hierarchical_binary <- function(nirs_data, max_nlv = 25) {
               
               if (length(test_route_idx) > 0) {
                 X_test_routed <- X_test_full[test_route_idx, selected_vars, drop = FALSE]
-                preds_routed  <- predict(mod_toxin, newdata = X_test_routed)
+                preds_routed  <- predict(mod_toxin, X = X_test_routed)
                 
                 final_test_classes[test_route_idx] <- as.character(preds_routed$pred)
                 final_test_scores[test_route_idx]  <- preds_routed$posterior[, 2]
