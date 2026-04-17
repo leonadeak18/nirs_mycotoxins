@@ -21,10 +21,12 @@ prep_methods <- list(
 varsel_methods <- list(
   "None" = function(x, y, max_comp, k_folds) { 1:ncol(x) },
   "VIP"  = function(x, y, max_comp, k_folds) {
+      set.seed(270725)
       df <- filterPLSR(y, x, ncomp = max_comp, ncomp.opt = "minimum", validation = "CV", segments = k_folds, VIP.threshold = 1)
       return(df$VIP)
   },
   "SR"   = function(x, y, max_comp, k_folds) {
+      set.seed(270725)
       df <- filterPLSR(y, x, ncomp = max_comp, ncomp.opt = "minimum", validation = "CV", segments = k_folds, SR.threshold = 1)
       return(df$SR)
   }

@@ -4,7 +4,7 @@ format: html
 ---
 
 # Hierarchical PLS_DA Evaluation
-
+# Evaluation on F1-Score and MCC on Overall
 ```{r}
 ## Import all results
 initial_data <- list(
@@ -15,11 +15,14 @@ initial_data <- list(
 )
 
 # remove all column except 1 - 5 and 15
-data <- lapply(initial_data, function(df) df[, c(1:5, 15)])
+data <- lapply(initial_data, function(df) df[, c(1:6, 16,17)])
 
 # remove Total_DON data on 1000 dataframes
 data$binary_1000 <- data$binary_1000[data$binary_1000$Target_toxin != "Total_DON", ]
 data$weighted_1000 <- data$weighted_1000[data$weighted_1000$Target_toxin != "Total_DON", ]
+
+#select Evaluation_Group = "Overall"
+data <- lapply(data, function(df) df[df$Evaluation_Group == "Overall", ])
 
 # add details about the sample_weight
 data$binary_1000$Sample_weight <- "None"
@@ -30,56 +33,59 @@ data$weighted_1250$Sample_weight <- "Weighted"
 # combine all dataframes into one
 combined_data <- do.call(rbind, data)
 
-#remove the second derivative data
-combined_data <- combined_data[combined_data$Preprocessing != "2nd_Der", ]
+# except F1_Score and MCCtransform all to factor
+combined_data[c(1:5, 9)] <- lapply(combined_data[c(1:5, 9)], as.factor)
 str(combined_data)
 
-# except MCC transform all to factor
-combined_data[c(1:5, 7)] <- lapply(combined_data[c(1:5, 7)], as.factor)
-str(combined_data)
-
-# Apply Fisher transformation to MCC
+#transform MCC using Fisher's z transformation
 combined_data$MCC_z <- atanh(combined_data$MCC)
 
 #rename the columns
 library(dplyr)
 lme_data <- combined_data %>%
  rename(
-   Material = Sample_source,
+   Grinding = Sample_source,
    Toxin = Target_toxin,
    Weighting = Sample_weight
  )
 ```
 
 ## Analysis using Linear mixed-effects
-This experiment is performed using Randomized Complete Block Design (RCBD) with 6 factors: Sample_weight, Target_toxin, Preprocessing, Variable_Selection and Sample_weight. The response variable is MCC_z.
+This experiment is performed using Full Factorial Design with 5 factors: Sample_weight, Target_toxin, Preprocessing, Variable_Selection and Sample_weight.
 
 ```{r}
+
+#### Data analysis for MCC_z
 library(lme4)
 library(lmerTest)
 library(emmeans)
-# Fit the linear mixed-effects model until three-way interaction
-model <- lmer(MCC_z ~ (Material + Toxin + Preprocessing + Variable_Selection + Weighting)^3 + (1|Split), data = lme_data)
-anova(model)
+# # Fit the linear mixed-effects model until three-way interaction
+model_mcc <- lmer(MCC_z ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^3 + (1|Split), data = lme_data)
+anova(model_mcc)
+summary(model_mcc)
+#select the best pipelines
+best_pipelines_mcc <- emmeans(model_mcc, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting)
+mcc_pipelines_df <- as.data.frame(best_pipelines_mcc$emmeans)
+mcc_pipelines_df <- mcc_pipelines_df[order(-mcc_pipelines_df$emmean), ]
 
+
+# Data analysis for F1_Score
+# Because F1_Score always between 0 and 1, therefore we cannot use lmer, we need to use glmmTMB with beta distribution
+library(glmmTMB)
+model_f1 <- glmmTMB(F1_Score ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^2 + (1|Split), data = lme_data, family = ordbeta(link = "logit"))
+library(car)
+Anova(model_f1, type = "III")
+summary(model_f1)
 # determine the ICC (intraclass correlation) of the model
 library(performance)
-icc(model)
-r2(model)
-
-
-summary(model)
-print(model, correlation = TRUE)
-library(sjPlot)
-tab_model(model)
+icc(model_f1)
+r2(model_f1)
 
 #select the best pipelines
-best_pipelines <- emmeans(model, pairwise ~ Material * Toxin * Preprocessing * Variable_Selection * Weighting)
-best_pipelines_df <- as.data.frame(best_pipelines$emmeans)
-best_pipelines_df <- best_pipelines_df[order(-best_pipelines_df$emmean), ]
-best_pipelines_df <- best_pipelines_df[1:10, ]
-#conclusion: the best pipeline is the one with the highest emmean value
-head(best_pipelines_df)
+best_pipelines_f1 <- emmeans(model_f1, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting)
+f1_pipelines_df <- as.data.frame(best_pipelines_f1$emmeans)
+f1_pipelines_df <- f1_pipelines_df[order(-f1_pipelines_df$emmean), ]
+
 ```
 
 ## Plot
