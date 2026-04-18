@@ -22,16 +22,16 @@ data$binary_1000 <- data$binary_1000[data$binary_1000$Target_toxin != "Total_DON
 data$weighted_1000 <- data$weighted_1000[data$weighted_1000$Target_toxin != "Total_DON", ]
 
 #select Evaluation_Group = "Overall"
-data <- lapply(data, function(df) df[df$Evaluation_Group == "Overall", ])
+data_overall <- lapply(data, function(df) df[df$Evaluation_Group == "Overall", ])
 
 # add details about the sample_weight
-data$binary_1000$Sample_weight <- "None"
-data$binary_1250$Sample_weight <- "None"
-data$weighted_1000$Sample_weight <- "Weighted"
-data$weighted_1250$Sample_weight <- "Weighted"
+data_overall$binary_1000$Sample_weight <- "None"
+data_overall$binary_1250$Sample_weight <- "None"
+data_overall$weighted_1000$Sample_weight <- "Weighted"
+data_overall$weighted_1250$Sample_weight <- "Weighted"
 
 # combine all dataframes into one
-combined_data <- do.call(rbind, data)
+combined_data <- do.call(rbind, data_overall)
 
 # except F1_Score and MCCtransform all to factor
 combined_data[c(1:5, 9)] <- lapply(combined_data[c(1:5, 9)], as.factor)
@@ -54,7 +54,6 @@ lme_data <- combined_data %>%
 This experiment is performed using Full Factorial Design with 5 factors: Sample_weight, Target_toxin, Preprocessing, Variable_Selection and Sample_weight.
 
 ```{r}
-
 #### Data analysis for MCC_z
 library(lme4)
 library(lmerTest)
@@ -72,7 +71,7 @@ mcc_pipelines_df <- mcc_pipelines_df[order(-mcc_pipelines_df$emmean), ]
 # Data analysis for F1_Score
 # Because F1_Score always between 0 and 1, therefore we cannot use lmer, we need to use glmmTMB with beta distribution
 library(glmmTMB)
-model_f1 <- glmmTMB(F1_Score ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^2 + (1|Split), data = lme_data, family = ordbeta(link = "logit"))
+model_f1 <- glmmTMB(F1_Score ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^3 + (1|Split), data = lme_data, family = ordbeta(link = "logit"))
 library(car)
 Anova(model_f1, type = "III")
 summary(model_f1)
@@ -85,6 +84,121 @@ r2(model_f1)
 best_pipelines_f1 <- emmeans(model_f1, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting)
 f1_pipelines_df <- as.data.frame(best_pipelines_f1$emmeans)
 f1_pipelines_df <- f1_pipelines_df[order(-f1_pipelines_df$emmean), ]
+
+```
+
+## Evaluation only using Austrian samples
+
+```{r}
+#select Evaluation_Group = "Austria"
+data_austrian <- lapply(data, function(df) df[df$Evaluation_Group == "Austria", ])
+
+# add details about the sample_weight
+data_austrian$binary_1000$Sample_weight <- "None"
+data_austrian$binary_1250$Sample_weight <- "None"
+data_austrian$weighted_1000$Sample_weight <- "Weighted"
+data_austrian$weighted_1250$Sample_weight <- "Weighted"
+
+# combine all dataframes into one
+combined_austrian <- do.call(rbind, data_austrian)
+
+# except F1_Score and MCCtransform all to factor
+combined_austrian[c(1:5, 9)] <- lapply(combined_austrian[c(1:5, 9)], as.factor)
+str(combined_austrian)
+
+#transform MCC using Fisher's z transformation
+combined_austrian$MCC_z <- atanh(combined_austrian$MCC)
+
+#rename the columns
+library(dplyr)
+lme_austrian <- combined_austrian %>%
+ rename(
+   Grinding = Sample_source,
+   Toxin = Target_toxin,
+   Weighting = Sample_weight
+ )
+
+
+#### Data analysis for MCC_z
+# # Fit the linear mixed-effects model until three-way interaction
+model_mcc_austrian <- lmer(MCC_z ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^3 + (1|Split), data = lme_austrian)
+anova(model_mcc_austrian)
+summary(model_mcc_austrian)
+#select the best pipelines
+best_pipelines_mcc_austrian <- emmeans(model_mcc_austrian, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting)
+mcc_pipelines_austrian_df <- as.data.frame(best_pipelines_mcc_austrian$emmeans)
+mcc_pipelines_austrian_df <- mcc_pipelines_austrian_df[order(-mcc_pipelines_austrian_df$emmean), ]
+
+
+# Data analysis for F1_Score
+# Because F1_Score always between 0 and 1, therefore we cannot use lmer, we need to use glmmTMB with beta distribution
+library(glmmTMB)
+model_f1_austrian <- glmmTMB(F1_Score ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^2 + (1|Split), data = lme_austrian, family = ordbeta(link = "logit"))
+library(car)
+Anova(model_f1_austrian, type = "III")
+summary(model_f1_austrian)
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model_f1_austrian)
+r2(model_f1_austrian)
+
+#select the best pipelines
+best_pipelines_f1_austrian <- emmeans(model_f1_austrian, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting)
+f1_pipelines_austrian_df <- as.data.frame(best_pipelines_f1_austrian$emmeans)
+f1_pipelines_austrian_df <- f1_pipelines_austrian_df[order(-f1_pipelines_austrian_df$emmean), ]
+```
+
+## Evaluation only using french samples
+
+```{r}
+#select Evaluation_Group = "France"
+data_french <- lapply(data, function(df) df[df$Evaluation_Group == "France", ])
+# add details about the sample_weight
+data_french$binary_1000$Sample_weight <- "None"
+data_french$binary_1250$Sample_weight <- "None"
+data_french$weighted_1000$Sample_weight <- "Weighted"
+data_french$weighted_1250$Sample_weight <- "Weighted"
+# combine all dataframes into one
+combined_french <- do.call(rbind, data_french)
+# except F1_Score and MCCtransform all to factor
+combined_french[c(1:5, 9)] <- lapply(combined_french[c(1:5, 9)], as.factor)
+str(combined_french)
+#transform MCC using Fisher's z transformation
+combined_french$MCC_z <- atanh(combined_french$MCC)
+#rename the columns
+library(dplyr)
+lme_french <- combined_french %>%
+ rename(
+   Grinding = Sample_source,
+   Toxin = Target_toxin,
+   Weighting = Sample_weight
+ )
+
+#### Data analysis for MCC_z
+# # Fit the linear mixed-effects model until three-way interaction
+model_mcc_french <- lmer(MCC_z ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^3 + (1|Split), data = lme_french)
+anova(model_mcc_french)
+summary(model_mcc_french)
+#select the best pipelines
+best_pipelines_mcc_french <- emmeans(model_mcc_french, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting)
+mcc_pipelines_french_df <- as.data.frame(best_pipelines_mcc_french$emmeans)
+mcc_pipelines_french_df <- mcc_pipelines_french_df[order(-mcc_pipelines_french_df$emmean), ]
+
+# Data analysis for F1_Score
+# Because F1_Score always between 0 and 1, therefore we cannot use lmer, we need to use glmmTMB with beta distribution
+library(glmmTMB)
+model_f1_french <- glmmTMB(F1_Score ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^2 + (1|Split), data = lme_french, family = ordbeta(link = "logit"))
+library(car)
+Anova(model_f1_french, type = "III")
+summary(model_f1_french)
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model_f1_french)
+r2(model_f1_french)
+#select the best pipelines
+best_pipelines_f1_french <- emmeans(model_f1_french, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting)
+f1_pipelines_french_df <- as.data.frame(best_pipelines_f1_french$emmeans)
+f1_pipelines_french_df <- f1_pipelines_french_df[order(-f1_pipelines_french_df$emmean), ]
 
 ```
 

@@ -15,7 +15,6 @@ prep_methods <- list(
   'SNV'     = function(x) savitzkyGolay(standardNormalVariate(x), w = 15, p = 2, m = 0),
   'Detrend_SNV' = function(x) savitzkyGolay(detrend(x, wav = as.numeric(colnames(x))), w = 15, p = 2, m = 0),
   '1st_Der' = function(x) savitzkyGolay(x, w = 15, p = 2, m = 1),
-  '2nd_Der' = function(x) savitzkyGolay(x, w = 15, p = 2, m = 2),
   "RNV"     = function(x) savitzkyGolay(rnv(x, r = 0.25), w = 15, p = 2, m = 0)
 )
 
@@ -23,10 +22,12 @@ prep_methods <- list(
 varsel_methods <- list(
   "None" = function(x, y, max_comp, k_folds){1:ncol(x)},
   "VIP" = function(x, y, max_comp, k_folds) {
+      set.seed(270725)
       df <- filterPLSR(y, x, ncomp = max_comp, ncomp.opt = "minimum", validation = "CV", segments = k_folds, VIP.threshold = 1)
       return(df$VIP)
       },
   "SR" = function(x, y, max_comp, k_folds) {
+      set.seed(270725)
       df <- filterPLSR(y, x, ncomp = max_comp, ncomp.opt = "minimum", validation = "CV", segments = k_folds, SR.threshold = 1)
       return(df$SR)
   }
@@ -164,6 +165,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, max_nlv = 25) {
               Accuracy = round(acc, 4),
               Sensitivity = round(sens, 4),
               Specitifity = round(spec, 4),
+              F1_Score = round(2 * ((sens * spec) / (sens + spec)), 4),
               MCC = round(mcc_val, 4),
               ROC_AUC = round(auc_val, 4),
               PR_AUC = round(pr_auc_val, 4),
@@ -185,4 +187,4 @@ pipeline_binary_plsda_sequential <- function(nirs_data, max_nlv = 25) {
 
 # --- Execution ---
 binary_plsda_results <- pipeline_binary_plsda_sequential(nirs_data)
-write.csv(binary_plsda_results, "./results/mixed_all/2_plsda_results.csv", row.names = FALSE)
+write.csv(binary_plsda_results, "./Austrian/results/2_plsda_results.csv", row.names = FALSE)
