@@ -1,7 +1,7 @@
 load_nirs_data <- function(splits = 10, threshold = 1000, 
                            weighted = c("none", "prob", "triangle")[1],
                            toxins = c("DON", "Total_DON"),
-                          material = c('intact', 'ground')) {
+                          material = c('intact', 'ground'), base_path = "./Austrian/data/splits/") {
   source("./Austrian/utils/preparation.R")
   # --- Setup Metadata ---
   sources <- material
@@ -22,8 +22,6 @@ load_nirs_data <- function(splits = 10, threshold = 1000,
     test_country[[source]] <- list()
     
     for (i in 1:splits) {
-      # Define file paths
-      base_path <- "./Austrian/data/splits/"
       
       # Load raw data
       X_train[[source]][[i]] <- read.csv(paste0(base_path, "X_train_", source, "_split_", i, ".csv"), row.names = 1)

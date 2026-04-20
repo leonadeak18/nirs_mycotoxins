@@ -84,32 +84,60 @@ pipeline_binary_plslda_sequential <- function(nirs_data, target_toxins, use_weig
             X_train_prep_sel <- X_train_prep[, selected_vars, drop = FALSE]
             X_test_prep_sel  <- X_test_prep[, selected_vars, drop = FALSE]
 
-            min_class_samples <- min(table(y_train))
-            current_max_nlv <- min(max_nlv, length(selected_vars), min_class_samples - 2)
-
+            # Start with a reasonable ceiling based on overall class sizes
+            min_cv_samples <- floor(min(table(y_train)) * 0.9)
+            current_max_nlv <- min(max_nlv, min_cv_samples - 2, length(selected_vars))
+            
             if (current_max_nlv < 1) {
-              cat(sprintf("Skipped: VarSel %s left too few variables for LDA.\n", varsel_name))
+              cat(sprintf("Skipped: VarSel %s left too few variables or samples for QDA.\n", varsel_name))
               next 
             }
             
-            # Pass the dynamic seed to the PLS-DA cross-validation
-            res_nlv <- plsr_plsda_allsteps(
-                      X = X_train_prep_sel, Xname = NULL, 
-                      Xscaling = "none", 
-                      Y = y_train, Yscaling = "none", weights = w_train,
-                      newX = NULL, newXname = NULL,
-                      method = "plslda",
-                      prior = "unif",
-                      step = "nlvtest",
-                      nlv = max_nlv, 
-                      modeloutput = c("scores","loadings","coef","vip"), 
-                      cvmethod = "kfolds", 
-                      nbrep = 10, 
-                      seed = current_seed, 
-                      nfolds = 10, 
-                      criterion = "err", 
-                      selection = "globalmin"
-            )
+            # --- NEW: THE TRY-CATCH BACKOFF LOOP ---
+            success <- FALSE
+            res_nlv <- NULL
+            
+            while (!success && current_max_nlv >= 1) {
+              
+              # Attempt to run the Cross-Validation
+              res_nlv <- tryCatch({
+                plsr_plsda_allsteps(
+                  X = X_train_prep_sel, Xname = NULL, 
+                  Xscaling = "none", 
+                  Y = y_train, Yscaling = "none", weights = w_train,
+                  newX = NULL, newXname = NULL,
+                  method = "plslda",
+                  prior = "unif",
+                  step = "nlvtest",
+                  nlv = current_max_nlv, 
+                  modeloutput = c("scores","loadings","coef","vip"), 
+                  cvmethod = "kfolds", 
+                  nbrep = 10, 
+                  seed = current_seed, 
+                  nfolds = 10, 
+                  criterion = "err", 
+                  selection = "globalmin"
+                )
+              }, error = function(e) {
+                # If it crashes, return the error object instead of stopping the script
+                return(e)
+              })
+              
+              # Check if the result was an error (like our singular matrix crash)
+              if (inherits(res_nlv, "error")) {
+                # Silently step down the Latent Variables by 1 and try again
+                current_max_nlv <- current_max_nlv - 1
+              } else {
+                # If no error, we break out of the loop successfully!
+                success <- TRUE
+              }
+            }
+            
+            # If we stepped all the way down to 0 and it still failed, skip to the next method
+            if (!success) {
+              cat(sprintf("Skipped: VarSel %s failed to converge at any LV for QDA.\n", varsel_name))
+              next
+            }
             
             opt_idx <- which(res_nlv$optimum == 1)[1]
             error_cv    <- res_nlv$err_mean[[opt_idx]]
