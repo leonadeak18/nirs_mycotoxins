@@ -10,7 +10,7 @@ spectra <- list(
 # remove the wavelengths to become 1100 - 2500 nm
 source("Austrian/utils/preparation.R")
 spectra <- lapply(spectra, function(df) {
-  prepare_df(df, r1 = 1100, r2 = 2500)
+  prepare_df(df, r1 = 780, r2 = 2500)
 })
 
 y_raw <- cbind(data['Deoxynivalenol'], data['Total_DON'])
@@ -18,12 +18,12 @@ colnames(y_raw) <- c("DON", "Total_DON")
 
 #Outlier detection
 library(mdatools)
-outlier_intact <- pca(spectra$intact, ncomp = 2)
-plotCumVariance(outlier_intact, show.label = TRUE) ## 2 components explain > 99% of variance
+outlier_intact <- pca(spectra$intact, ncomp = 3)
+plotCumVariance(outlier_intact, show.label = TRUE) ## 3 components explain > 99% of variance
 plotDistances(outlier_intact, show.label = TRUE) ## outlier on 99631 and 99632
 
-outlier_ground <- pca(spectra$ground, ncomp = 2)
-plotCumVariance(outlier_ground, show.label = TRUE) ## 2 components explain > 99% of variance
+outlier_ground <- pca(spectra$ground, ncomp = 3)
+plotCumVariance(outlier_ground, show.label = TRUE) ## 3 components explain > 99% of variance
 plotDistances(outlier_ground, show.label = TRUE) ## outlier on 99022 and 99098
 
 #remove the outliers
@@ -62,15 +62,15 @@ for (i in 1:10) {
 
 ## Export the splits as csv files
 for (i in 1:10) {
-  write.csv(train_spectra[[i]]$intact, paste0("Austrian/data/splits/X_train_intact_split_", i, ".csv"), row.names = TRUE)
-  write.csv(test_spectra[[i]]$intact, paste0("Austrian/data/splits/X_test_intact_split_", i, ".csv"), row.names = TRUE)
+  write.csv(train_spectra[[i]]$intact, paste0("Austrian/data/splits_2/X_train_intact_split_", i, ".csv"), row.names = TRUE)
+  write.csv(test_spectra[[i]]$intact, paste0("Austrian/data/splits_2/X_test_intact_split_", i, ".csv"), row.names = TRUE)
   
-  write.csv(train_spectra[[i]]$ground, paste0("Austrian/data/splits/X_train_ground_split_", i, ".csv"), row.names = TRUE)
-  write.csv(test_spectra[[i]]$ground, paste0("Austrian/data/splits/X_test_ground_split_", i, ".csv"), row.names = TRUE)
+  write.csv(train_spectra[[i]]$ground, paste0("Austrian/data/splits_2/X_train_ground_split_", i, ".csv"), row.names = TRUE)
+  write.csv(test_spectra[[i]]$ground, paste0("Austrian/data/splits_2/X_test_ground_split_", i, ".csv"), row.names = TRUE)
   
-  write.csv(train_y[[i]]$ground, paste0("Austrian/data/splits/y_train_ground_split_", i, ".csv"), row.names = TRUE)
-  write.csv(test_y[[i]]$ground, paste0("Austrian/data/splits/y_test_ground_split_", i, ".csv"), row.names = TRUE)
+  write.csv(train_y[[i]]$ground, paste0("Austrian/data/splits_2/y_train_ground_split_", i, ".csv"), row.names = TRUE)
+  write.csv(test_y[[i]]$ground, paste0("Austrian/data/splits_2/y_test_ground_split_", i, ".csv"), row.names = TRUE)
 
-  write.csv(train_y[[i]]$intact, paste0("Austrian/data/splits/y_train_intact_split_", i, ".csv"), row.names = TRUE)
-  write.csv(test_y[[i]]$intact, paste0("Austrian/data/splits/y_test_intact_split_", i, ".csv"), row.names = TRUE)
+  write.csv(train_y[[i]]$intact, paste0("Austrian/data/splits_2/y_train_intact_split_", i, ".csv"), row.names = TRUE)
+  write.csv(test_y[[i]]$intact, paste0("Austrian/data/splits_2/y_test_intact_split_", i, ".csv"), row.names = TRUE)
 }
