@@ -83,6 +83,14 @@ pipeline_binary_plsqda_sequential <- function(nirs_data, target_toxins, use_weig
           
             X_train_prep_sel <- X_train_prep[, selected_vars, drop = FALSE]
             X_test_prep_sel  <- X_test_prep[, selected_vars, drop = FALSE]
+
+            min_class_samples <- min(table(y_train))
+            current_max_nlv <- min(max_nlv, length(selected_vars), min_class_samples - 2)
+
+            if (current_max_nlv < 1) {
+              cat(sprintf("Skipped: VarSel %s left too few variables for QDA.\n", varsel_name))
+              next 
+            }
             
             # Pass the dynamic seed to the PLS-DA cross-validation
             res_nlv <- plsr_plsda_allsteps(
