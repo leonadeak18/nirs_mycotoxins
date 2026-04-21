@@ -205,7 +205,7 @@ library(lme4)
 library(lmerTest)
 library(emmeans)
 # # Fit the linear mixed-effects model until three-way interaction
-model_ds_mcc <- lmer(MCC_z ~ Grinding + Weighting + Toxin + Preprocessing + Variable_Selection + (1|Split), data = lme_ds_data)
+model_ds_mcc <- lmer(MCC_z ~ (Grinding + Weighting + Toxin + Preprocessing + Variable_Selection)^3 + (1|Split), data = lme_ds_data)
 anova(model_ds_mcc)
 summary(model_ds_mcc)
 

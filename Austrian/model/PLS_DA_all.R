@@ -1,4 +1,5 @@
-# Set a global seed for the entire script
+# Set a global seed and parallel-safe RNG for the entire script
+RNGkind("L'Ecuyer-CMRG")
 set.seed(270725)
 
 # Import pipeline config
@@ -46,7 +47,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
   for (material in materials) {
     for (i in 1:10) { 
       
-      # Create a unique but perfectly reproducible seed for this specific split
+      # Create a unique but perfectly reproducible base seed for this specific split
       current_seed <- 270725 + i
       
       for (toxin in target_toxins) {
@@ -76,7 +77,10 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
           min_class_size <- min(length(class_0_idx), length(class_1_idx))
           
           # Sample both classes to match the minority size
-          set.seed(current_seed) 
+          # Lock seed using material and toxin to prevent identical sampling across datasets
+          combo_downsample_seed <- current_seed + match(material, materials) * 1000L + match(toxin, target_toxins) * 100L
+          set.seed(combo_downsample_seed) 
+          
           down_class_0_idx <- sample(class_0_idx, min_class_size)
           down_class_1_idx <- sample(class_1_idx, min_class_size)
           
@@ -101,10 +105,20 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
           
           for (varsel_name in varsel_names){
             
+            # Derive a unique, deterministic seed for every combination so that
+            # the RNG state is fully isolated — no bleed-through from prior loop
+            # iterations regardless of execution order or platform differences.
+            combo_seed <- current_seed +
+              match(material, materials)       * 10000L +
+              match(toxin, target_toxins)      * 1000L +
+              match(prep_name, preps)          * 100L +
+              match(varsel_name, varsel_names) * 10L
+            set.seed(combo_seed)
+            
             selected_vars <- varsel_methods[[varsel_name]](
               x = X_train_prep, 
               y = as.numeric(y_train), 
-              max_comp = max_nlv, k_folds = 10, cur_seed = current_seed)
+              max_comp = max_nlv, k_folds = 10, cur_seed = combo_seed)
           
             X_train_prep_sel <- X_train_prep[, selected_vars, drop = FALSE]
             X_test_prep_sel  <- X_test_prep[, selected_vars, drop = FALSE]
@@ -120,7 +134,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
                       modeloutput = c("scores","loadings","coef","vip"), 
                       cvmethod = "kfolds", 
                       nbrep = 10, 
-                      seed = current_seed, 
+                      seed = combo_seed, 
                       nfolds = 10, 
                       criterion = "err", 
                       selection = "globalmin"
@@ -221,7 +235,8 @@ for (cfg in run_configs) {
   message(sprintf("\n--- Starting Run: Threshold = %d, Weighted = %s, Toxin = %s ---", 
                   cfg$threshold, cfg$weighted, cfg$toxin))
   
-  # Load the specific dataset for this run
+  # Lock the seed before loading to prevent OS-level file shifting
+  set.seed(270725)
   current_nirs_data <- load_nirs_data(weighted = cfg$weighted, threshold = cfg$threshold, base_path = "./Austrian/data/splits/")
   
   # Determine if we should use weights in the modeling functions
@@ -236,7 +251,7 @@ for (cfg in run_configs) {
   )
   
   # Save the results
-  output_path <- file.path("./Austrian/results", cfg$output)
+  output_path <- file.path("./Austrian/results/reproduce_test2", cfg$output)
   write.csv(binary_plsda_results, output_path, row.names = FALSE)
   
   message(sprintf("Saved results to %s\n", output_path))
