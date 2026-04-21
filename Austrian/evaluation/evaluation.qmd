@@ -59,7 +59,7 @@ library(lme4)
 library(lmerTest)
 library(emmeans)
 # # Fit the linear mixed-effects model until three-way interaction
-model_mcc <- lmer(MCC_z ~ (Grinding + Weighting + Toxin + Preprocessing + Variable_Selection )^3 + (1|Split), data = lme_data)
+model_mcc <- lmer(MCC_z ~ (Grinding + Weighting + Toxin + Preprocessing + Variable_Selection )^2 + (1|Split), data = lme_data)
 anova(model_mcc)
 summary(model_mcc)
 #select the best pipelines
@@ -99,7 +99,7 @@ ds_data <- list(
 )
 
 # remove all column except 1 - 5 and 15
-ds_data_cut <- lapply(ds_data, function(df) df[, c(1:5, 16,17)])
+ds_data_cut <- lapply(ds_data, function(df) df[, c(1:5, 9:12, 16,17)])
 
 # add details about the sample_weight
 ds_data_cut$binary_1000$Sample_weight <- "None"
@@ -111,11 +111,13 @@ ds_data_cut$weighted_1250$Sample_weight <- "Weighted"
 combined_ds_data <- do.call(rbind, ds_data_cut)
 
 # except F1_Score and MCCtransform all to factor
-combined_ds_data[c(1:5, 8)] <- lapply(combined_ds_data[c(1:5, 8)], as.factor)
+combined_ds_data[c(1:5, 12)] <- lapply(combined_ds_data[c(1:5, 12)], as.factor)
 str(combined_ds_data)
 
 #transform MCC using Fisher's z transformation
 combined_ds_data$MCC_z <- atanh(combined_ds_data$MCC)
+combined_ds_data$TPR <- combined_ds_data$TP / (combined_ds_data$TP + combined_ds_data$FN)
+combined_ds_data$TNR <- combined_ds_data$TN / (combined_ds_data$TN + combined_ds_data$FP)
 
 #rename the columns
 library(dplyr)
@@ -127,6 +129,74 @@ lme_ds_data <- combined_ds_data %>%
  )
 ```
 
+## Plot the TPR and TNR of the downsampling data
+
+```{r}
+library(ggpubr)
+library(viridis)
+density_plot <- function(data, var, color, label, title){
+  plot <- ggplot(data, aes(x = var, fill = color)) +
+    geom_density(alpha = 0.5) +
+    theme_classic() +
+    scale_y_continuous(limits = c(0, 5)) +
+    labs(title = title, x = label, fill = color) +
+    scale_fill_viridis(discrete = TRUE) +
+    theme(legend.position = "top",
+    legend.title = element_blank())
+  return(plot)
+}
+
+# Plot TPR
+tp_plot <- density_plot(lme_ds_data, lme_ds_data$TPR, color = "TPR", label = "True Positive Rate", title = "TPR of all pipelines") + scale_fill_manual(values = c("TPR" = "#DB1A1A"))
+tp_weighting_plot <- density_plot(lme_ds_data, lme_ds_data$TPR, lme_ds_data$Weighting, label = "True Positive Rate", title = "Effect of Weighting")
+tp_toxin_plot <- density_plot(lme_ds_data, lme_ds_data$TPR, lme_ds_data$Toxin, label = "True Positive Rate", title = "Effect of Toxin")
+tp_grinding_plot <- density_plot(lme_ds_data, lme_ds_data$TPR, lme_ds_data$Grinding, label = "True Positive Rate", title = "Effect of Grinding")
+tp_preprocessing_plot <- density_plot(lme_ds_data, lme_ds_data$TPR, lme_ds_data$Preprocessing, label = "True Positive Rate", title = "Effect of Preprocessing")
+tp_variable_selection_plot <- density_plot(lme_ds_data, lme_ds_data$TPR, lme_ds_data$Variable_Selection, label = "True Positive Rate", title = "Effect of Variable Selection")
+
+# Plot TNR
+tn_plot <- density_plot(lme_ds_data, lme_ds_data$TNR, color = "TNR", label = "True Negative Rate", title = "TNR of all pipelines") + scale_fill_manual(values = c("TNR" = "#2FA4D7"))
+tn_weighting_plot <- density_plot(lme_ds_data, lme_ds_data$TNR, lme_ds_data$Weighting, label = "True Negative Rate", title = NULL)
+tn_toxin_plot <- density_plot(lme_ds_data, lme_ds_data$TNR, lme_ds_data$Toxin, label = "True Negative Rate", title = NULL)
+tn_grinding_plot <- density_plot(lme_ds_data, lme_ds_data$TNR, lme_ds_data$Grinding, label = "True Negative Rate", title = NULL)
+tn_preprocessing_plot <- density_plot(lme_ds_data, lme_ds_data$TNR, lme_ds_data$Preprocessing, label = "True Negative Rate", title = NULL)
+tn_variable_selection_plot <- density_plot(lme_ds_data, lme_ds_data$TNR, lme_ds_data$Variable_Selection, label = "True Negative Rate", title = NULL)
+
+# Arrange the plots in a grid
+tp_tn <- ggarrange(tp_plot, tn_plot, ncol = 2, nrow = 1)
+ggsave("./Austrian/figures/downsampling_tpr_tnr_density_plots_overall.svg", tp_tn, width = 12, height = 6)
+tpr_tnr <- ggarrange(tp_weighting_plot, tp_toxin_plot, tp_grinding_plot, tp_preprocessing_plot, tp_variable_selection_plot,
+          tn_weighting_plot, tn_toxin_plot, tn_grinding_plot, tn_preprocessing_plot, tn_variable_selection_plot,
+          ncol = 5, nrow = 2)
+ggsave("./Austrian/figures/downsampling_tpr_tnr_density_plots.svg", tpr_tnr, width = 20, height = 8)
+
+
+## Plot the MCC
+mcc_plot <- density_plot(lme_ds_data, lme_ds_data$MCC, color = "MCC", label = "MCC", title = "MCC of all pipelines") + scale_fill_manual(values = c("MCC" = "#1A9BDB"))
+mcc_weighting_plot <- density_plot(lme_ds_data, lme_ds_data$MCC, lme_ds_data$Weighting, label = "MCC", title = "Effect of Weighting")
+mcc_toxin_plot <- density_plot(lme_ds_data, lme_ds_data$MCC, lme_ds_data$Toxin, label = "MCC", title = "Effect of Toxin")
+mcc_grinding_plot <- density_plot(lme_ds_data, lme_ds_data$MCC, lme_ds_data$Grinding, label = "MCC", title = "Effect of Grinding")
+mcc_preprocessing_plot <- density_plot(lme_ds_data, lme_ds_data$MCC, lme_ds_data$Preprocessing, label = "MCC", title = "Effect of Preprocessing")
+mcc_variable_selection_plot <- density_plot(lme_ds_data, lme_ds_data$MCC, lme_ds_data$Variable_Selection, label = "MCC", title = "Effect of Variable Selection")
+mcc_plots <- ggarrange(mcc_plot, mcc_weighting_plot, mcc_toxin_plot, mcc_grinding_plot, mcc_preprocessing_plot, mcc_variable_selection_plot,
+          ncol = 3, nrow = 2)
+ggsave("./Austrian/figures/downsampling_mcc_density_plots.svg", mcc_plots, width = 12, height = 6)
+
+## Plot the F1_Score
+f1_plot <- density_plot(lme_ds_data, lme_ds_data$F1_score, color = "F1_Score", label = "F1 Score", title = "F1 Score of all pipelines") + 
+  scale_fill_manual(values = c("F1_Score" = "#DBA41A")) +
+  scale_y_continuous(limits = c(0, 8))
+
+f1_weighting_plot <- density_plot(lme_ds_data, lme_ds_data$F1_score, lme_ds_data$Weighting, label = "F1 Score", title = "Effect of Weighting") + scale_y_continuous(limits = c(0, 8))
+f1_toxin_plot <- density_plot(lme_ds_data, lme_ds_data$F1_score, lme_ds_data$Toxin, label = "F1 Score", title = "Effect of Toxin") + scale_y_continuous(limits = c(0, 8))
+f1_grinding_plot <- density_plot(lme_ds_data, lme_ds_data$F1_score, lme_ds_data$Grinding, label = "F1 Score", title = "Effect of Grinding") + scale_y_continuous(limits = c(0, 8))
+f1_preprocessing_plot <- density_plot(lme_ds_data, lme_ds_data$F1_score, lme_ds_data$Preprocessing, label = "F1 Score", title = "Effect of Preprocessing") + scale_y_continuous(limits = c(0, 8))
+f1_variable_selection_plot <- density_plot(lme_ds_data, lme_ds_data$F1_score, lme_ds_data$Variable_Selection, label = "F1 Score", title = "Effect of Variable Selection") + scale_y_continuous(limits = c(0, 8))
+f1_plots <- ggarrange(f1_plot, f1_weighting_plot, f1_toxin_plot, f1_grinding_plot, f1_preprocessing_plot, f1_variable_selection_plot,
+          ncol = 3, nrow = 2)
+ggsave("./Austrian/figures/downsampling_f1_density_plots.svg", f1_plots, width = 12, height = 6)
+```
+
 # Fit the linear mixed-effects model until three-way interaction
 
 ```{r}
@@ -135,7 +205,7 @@ library(lme4)
 library(lmerTest)
 library(emmeans)
 # # Fit the linear mixed-effects model until three-way interaction
-model_ds_mcc <- lmer(MCC ~ (Grinding + Weighting + Toxin + Preprocessing + Variable_Selection )^3 + (1|Split), data = lme_ds_data)
+model_ds_mcc <- lmer(MCC_z ~ Grinding + Weighting + Toxin + Preprocessing + Variable_Selection + (1|Split), data = lme_ds_data)
 anova(model_ds_mcc)
 summary(model_ds_mcc)
 
@@ -145,7 +215,7 @@ icc(model_ds_mcc)
 r2(model_ds_mcc)
 
 #select the best pipelines
-best_pipelines_ds_mcc <- emmeans(model_ds_mcc, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting)
+best_pipelines_ds_mcc <- emmeans(model_ds_mcc, pairwise ~ Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)
 mcc_ds_pipelines_df <- as.data.frame(best_pipelines_ds_mcc$emmeans)
 mcc_ds_pipelines_df <- mcc_ds_pipelines_df[order(-mcc_ds_pipelines_df$emmean), ]
 
@@ -153,9 +223,8 @@ mcc_ds_pipelines_df <- mcc_ds_pipelines_df[order(-mcc_ds_pipelines_df$emmean), ]
 # Data analysis for F1_Score
 # Because F1_Score always between 0 and 1, therefore we cannot use lmer, we need to use glmmTMB with beta distribution
 library(glmmTMB)
-model_f1 <- glmmTMB(F1_score ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^2 + (1|Split), data = lme_ds_data, family = ordbeta(link = "logit"))
-library(car)
-Anova(model_f1, type = "III")
+model_f1 <- lmer(F1_score ~ Grinding + Toxin + Preprocessing + Variable_Selection + Weighting + (1|Split), data = lme_ds_data)
+anova(model_f1)
 summary(model_f1)
 # determine the ICC (intraclass correlation) of the model
 library(performance)
@@ -163,9 +232,20 @@ icc(model_f1)
 r2(model_f1)
 
 #select the best pipelines
-best_pipelines_f1 <- emmeans(model_f1, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting, type = "response")
+best_pipelines_f1 <- emmeans(model_f1, pairwise ~ Grinding + Toxin + Preprocessing + Variable_Selection + Weighting, type = "response")
 f1_pipelines_df <- as.data.frame(best_pipelines_f1$emmeans)
-f1_pipelines_df <- f1_pipelines_df[order(-f1_pipelines_df$response), ]
+f1_pipelines_df <- f1_pipelines_df[order(-f1_pipelines_df$emmean), ]
+
+## Data analysis for TPR
+model_tpr <- lmer(TPR ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^2 + (1|Split), data = lme_ds_data)
+anova(model_tpr)
+summary(model_tpr)
+
+#select the best pipelines
+best_pipelines_tpr <- emmeans(model_tpr, pairwise ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^3)
+tpr_pipelines_df <- as.data.frame(best_pipelines_tpr$emmeans)
+tpr_pipelines_df <- tpr_pipelines_df[order(-tpr_pipelines_df$emmean), ]
+
 ```
 
 ## Plotting on MCC
@@ -192,3 +272,162 @@ ggplot(plot_data, aes(x = Toxin, y = mean_MCC, color = Weighting, group = Weight
        y = "Mean MCC Score",
        color = "Weighting")
 ```
+
+# PLS-DA with 780 nm to 2500 nm
+
+```{r}
+## Import all results
+data_780 <- list(
+    "binary_1000" = read.csv("./Austrian/results/780/plsda_1000_all.csv"),
+    "binary_1250" = read.csv("./Austrian/results/780/plsda_1250_all.csv"),
+    "weighted_1000" = read.csv("./Austrian/results/780/weighted_plsda_1000_all.csv"),
+    "weighted_1250" = read.csv("./Austrian/results/780/weighted_plsda_1250_all.csv")
+)
+
+# remove all column except 1 - 5 and 15
+data_780_cut <- lapply(data_780, function(df) df[, c(1:5, 16,17)])
+
+# add details about the sample_weight
+data_780_cut$binary_1000$Sample_weight <- "None"
+data_780_cut$binary_1250$Sample_weight <- "None"
+data_780_cut$weighted_1000$Sample_weight <- "Weighted"
+data_780_cut$weighted_1250$Sample_weight <- "Weighted"
+
+# combine all dataframes into one
+combined_780_data <- do.call(rbind, data_780_cut)
+
+# except F1_Score and MCCtransform all to factor
+combined_780_data[c(1:5, 8)] <- lapply(combined_780_data[c(1:5, 8)], as.factor)
+str(combined_780_data)
+
+#transform MCC using Fisher's z transformation
+combined_780_data$MCC_z <- atanh(combined_780_data$MCC)
+
+#rename the columns
+library(dplyr)
+lme_780_data <- combined_780_data %>%
+ rename(
+   Grinding = Sample_source,
+   Toxin = Target_toxin,
+   Weighting = Sample_weight
+ )
+
+#### Data analysis for MCC_z
+library(lme4)
+library(lmerTest)
+library(emmeans)
+# # Fit the linear mixed-effects model until three-way interaction
+model_780_mcc <- lmer(MCC_z ~ (Grinding + Weighting + Toxin + Preprocessing + Variable_Selection )^3 + (1|Split), data = lme_780_data)
+anova(model_780_mcc)
+summary(model_780_mcc)
+
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model_780_mcc)
+r2(model_780_mcc)
+
+#select the best pipelines
+best_pipelines_780_mcc <- emmeans(model_780_mcc, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting)
+mcc_780_pipelines_df <- as.data.frame(best_pipelines_780_mcc$emmeans)
+mcc_780_pipelines_df <- mcc_780_pipelines_df[order(-mcc_780_pipelines_df$emmean), ]
+
+
+# Data analysis for F1_Score
+# Because F1_Score always between 0 and 1, therefore we cannot use lmer, we need to use glmmTMB with beta distribution
+library(glmmTMB)
+model_f1_780 <- glmmTMB(F1_score ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^2 + (1|Split), data = lme_780_data, family = ordbeta(link = "logit"))
+library(car)
+Anova(model_f1_780, type = "III")
+summary(model_f1_780)
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model_f1_780)
+r2(model_f1_780)
+
+#select the best pipelines
+best_pipelines_f1_780 <- emmeans(model_f1_780, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting, type = "response")
+f1_780_pipelines_df <- as.data.frame(best_pipelines_f1_780$emmeans)
+f1_780_pipelines_df <- f1_780_pipelines_df[order(-f1_780_pipelines_df$response), ]
+```
+
+
+#PLS_LDA Evaluation on F1-Score and MCC on Overall
+
+```{r}
+## Import all results
+plslda_data <- list(
+    "binary_1000" = read.csv("./Austrian/results/plslda_1000_results.csv"),
+    "binary_1250" = read.csv("./Austrian/results/plslda_1250_results.csv"),
+    "weighted_1000" = read.csv("./Austrian/results/weighted_plslda_1000_results.csv"),
+    "weighted_1250" = read.csv("./Austrian/results/weighted_plslda_1250_results.csv")
+)
+
+# remove all column except 1 - 5 and 15
+plslda_data_cut <- lapply(plslda_data, function(df) df[, c(1:5, 16,17)])
+
+# add details about the sample_weight
+plslda_data_cut$binary_1000$Sample_weight <- "None"
+plslda_data_cut$binary_1250$Sample_weight <- "None"
+plslda_data_cut$weighted_1000$Sample_weight <- "Weighted"
+plslda_data_cut$weighted_1250$Sample_weight <- "Weighted"
+
+# combine all dataframes into one
+combined_plslda_data <- do.call(rbind, plslda_data_cut)
+
+# except F1_Score and MCCtransform all to factor
+combined_plslda_data[c(1:5, 8)] <- lapply(combined_plslda_data[c(1:5, 8)], as.factor)
+str(combined_plslda_data)
+
+#transform MCC using Fisher's z transformation
+combined_plslda_data$MCC_z <- atanh(combined_plslda_data$MCC)
+
+#rename the columns
+library(dplyr)
+lme_plslda_data <- combined_plslda_data %>%
+ rename(
+   Grinding = Sample_source,
+   Toxin = Target_toxin,
+   Weighting = Sample_weight
+ )
+```
+
+
+```{r}
+#### Data analysis for MCC_z
+library(lme4)
+library(lmerTest)
+library(emmeans)
+# # Fit the linear mixed-effects model until three-way interaction
+model_plslda_mcc <- lmer(MCC ~ (Grinding + Weighting + Toxin + Preprocessing + Variable_Selection )^3 + (1|Split), data = lme_plslda_data)
+anova(model_plslda_mcc)
+summary(model_plslda_mcc)
+
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model_plslda_mcc)
+r2(model_plslda_mcc)
+
+#select the best pipelines
+best_pipelines_plslda_mcc <- emmeans(model_plslda_mcc, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting)
+mcc_plslda_pipelines_df <- as.data.frame(best_pipelines_plslda_mcc$emmeans)
+mcc_plslda_pipelines_df <- mcc_plslda_pipelines_df[order(-mcc_plslda_pipelines_df$emmean), ]
+
+
+# Data analysis for F1_Score
+# Because F1_Score always between 0 and 1, therefore we cannot use lmer, we need to use glmmTMB with beta distribution
+library(glmmTMB)
+model_f1 <- glmmTMB(F1_score ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^2 + (1|Split), data = lme_ds_data, family = ordbeta(link = "logit"))
+library(car)
+Anova(model_f1, type = "III")
+summary(model_f1)
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model_f1)
+r2(model_f1)
+
+#select the best pipelines
+best_pipelines_f1 <- emmeans(model_f1, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Weighting, type = "response")
+f1_pipelines_df <- as.data.frame(best_pipelines_f1$emmeans)
+f1_pipelines_df <- f1_pipelines_df[order(-f1_pipelines_df$response), ]
+```
+

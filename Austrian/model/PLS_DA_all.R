@@ -222,7 +222,7 @@ for (cfg in run_configs) {
                   cfg$threshold, cfg$weighted, cfg$toxin))
   
   # Load the specific dataset for this run
-  current_nirs_data <- load_nirs_data(weighted = cfg$weighted, threshold = cfg$threshold, base_path = "./Austrian/data/splits_2/")
+  current_nirs_data <- load_nirs_data(weighted = cfg$weighted, threshold = cfg$threshold, base_path = "./Austrian/data/splits/")
   
   # Determine if we should use weights in the modeling functions
   use_weights_flag <- (cfg$weighted == "triangle")
@@ -236,7 +236,7 @@ for (cfg in run_configs) {
   )
   
   # Save the results
-  output_path <- file.path("./Austrian/results/780", cfg$output)
+  output_path <- file.path("./Austrian/results", cfg$output)
   write.csv(binary_plsda_results, output_path, row.names = FALSE)
   
   message(sprintf("Saved results to %s\n", output_path))

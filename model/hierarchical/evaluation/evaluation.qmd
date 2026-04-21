@@ -50,6 +50,12 @@ lme_data <- combined_data %>%
  )
 ```
 
+## Plot the distribution of MCC, F1_Score, TPR and TNR
+
+```{r}
+
+```
+
 ## Analysis using Linear mixed-effects
 This experiment is performed using Full Factorial Design with 5 factors: Sample_weight, Target_toxin, Preprocessing, Variable_Selection and Sample_weight.
 
@@ -59,7 +65,10 @@ library(lme4)
 library(lmerTest)
 library(emmeans)
 # # Fit the linear mixed-effects model until three-way interaction
-model_mcc <- lmer(MCC_z ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^3 + (1|Split), data = lme_data)
+model_mcc <- lmer(MCC ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^3 + (1|Split), data = lme_data)
+plot(model_mcc)
+#create a qqplot of the residuals
+qqnorm(residuals(model_mcc))
 anova(model_mcc)
 summary(model_mcc)
 #select the best pipelines

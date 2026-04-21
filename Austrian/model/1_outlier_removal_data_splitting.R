@@ -10,7 +10,7 @@ spectra <- list(
 # remove the wavelengths to become 1100 - 2500 nm
 source("Austrian/utils/preparation.R")
 spectra <- lapply(spectra, function(df) {
-  prepare_df(df, r1 = 780, r2 = 2500)
+  prepare_df(df, r1 = 1100, r2 = 2500)
 })
 
 y_raw <- cbind(data['Deoxynivalenol'], data['Total_DON'])
@@ -37,40 +37,51 @@ y <- list(
 library(caret)
 
 ## Create the stratification factor
-distribution <- as.factor(ifelse(y$intact$DON < 1000, "LC", "HC"))
+distribution_intact <- as.factor(ifelse(y$intact$DON < 1000, "LC", "HC"))
+distribution_ground <- as.factor(ifelse(y$ground$DON < 1000, "LC", "HC"))
 
 ## Creates all 10 splits at once
 set.seed(270725)
-split_indices <- createDataPartition(distribution, p = 0.8, times = 10)
+split_indices_intact <- createDataPartition(distribution_intact, p = 0.8, times = 10)
+split_indices_ground <- createDataPartition(distribution_ground, p = 0.8, times = 10)
+
 ## Initialize empty lists
-train_spectra <- list()
-test_spectra <- list()
-train_y <- list()
-test_y <- list()
+train_spectra <- list(); test_spectra <- list()
+train_y <- list(); test_y <- list()
 
-## Loop through the 10 sets of indices
+## Loop through the 10 sets
 for (i in 1:10) {
-  idx <- split_indices[[i]] 
+  # Extract specific indices for this iteration
+  idx_i <- split_indices_intact[[i]]
+  idx_g <- split_indices_ground[[i]]
   
-  # Use idx for training, and -idx (everything else) for testing
-  train_spectra[[i]] <- lapply(spectra, function(df) df[idx, ])
-  test_spectra[[i]]  <- lapply(spectra, function(df) df[-idx, ])
+  # --- Process Intact ---
+  # Assuming spectra and y are lists containing an "intact" element
+  train_spectra$intact[[i]] <- spectra$intact[idx_i, ]
+  test_spectra$intact[[i]]  <- spectra$intact[-idx_i, ]
   
-  train_y[[i]] <- lapply(y, function(df) df[idx, ])
-  test_y[[i]]  <- lapply(y, function(df) df[-idx, ])
-}
-
-## Export the splits as csv files
-for (i in 1:10) {
-  write.csv(train_spectra[[i]]$intact, paste0("Austrian/data/splits_2/X_train_intact_split_", i, ".csv"), row.names = TRUE)
-  write.csv(test_spectra[[i]]$intact, paste0("Austrian/data/splits_2/X_test_intact_split_", i, ".csv"), row.names = TRUE)
+  train_y$intact[[i]]       <- y$intact[idx_i, ]
+  test_y$intact[[i]]        <- y$intact[-idx_i, ]
   
-  write.csv(train_spectra[[i]]$ground, paste0("Austrian/data/splits_2/X_train_ground_split_", i, ".csv"), row.names = TRUE)
-  write.csv(test_spectra[[i]]$ground, paste0("Austrian/data/splits_2/X_test_ground_split_", i, ".csv"), row.names = TRUE)
+  # --- Process Ground ---
+  train_spectra$ground[[i]] <- spectra$ground[idx_g, ]
+  test_spectra$ground[[i]]  <- spectra$ground[-idx_g, ]
   
-  write.csv(train_y[[i]]$ground, paste0("Austrian/data/splits_2/y_train_ground_split_", i, ".csv"), row.names = TRUE)
-  write.csv(test_y[[i]]$ground, paste0("Austrian/data/splits_2/y_test_ground_split_", i, ".csv"), row.names = TRUE)
-
-  write.csv(train_y[[i]]$intact, paste0("Austrian/data/splits_2/y_train_intact_split_", i, ".csv"), row.names = TRUE)
-  write.csv(test_y[[i]]$intact, paste0("Austrian/data/splits_2/y_test_intact_split_", i, ".csv"), row.names = TRUE)
+  train_y$ground[[i]]       <- y$ground[idx_g, ]
+  test_y$ground[[i]]        <- y$ground[-idx_g, ]
+  
+  # --- Export Files ---
+  # Ensure the directory exists: dir.create("Austrian/data/splits/", recursive = TRUE, showWarnings = FALSE)
+  
+  # Export Intact
+  write.csv(train_spectra$intact[[i]], paste0("Austrian/data/splits/X_train_intact_split_", i, ".csv"), row.names = TRUE)
+  write.csv(test_spectra$intact[[i]],  paste0("Austrian/data/splits/X_test_intact_split_", i, ".csv"), row.names = TRUE)
+  write.csv(train_y$intact[[i]],       paste0("Austrian/data/splits/y_train_intact_split_", i, ".csv"), row.names = TRUE)
+  write.csv(test_y$intact[[i]],        paste0("Austrian/data/splits/y_test_intact_split_", i, ".csv"), row.names = TRUE)
+  
+  # Export Ground
+  write.csv(train_spectra$ground[[i]], paste0("Austrian/data/splits/X_train_ground_split_", i, ".csv"), row.names = TRUE)
+  write.csv(test_spectra$ground[[i]],  paste0("Austrian/data/splits/X_test_ground_split_", i, ".csv"), row.names = TRUE)
+  write.csv(train_y$ground[[i]],       paste0("Austrian/data/splits/y_train_ground_split_", i, ".csv"), row.names = TRUE)
+  write.csv(test_y$ground[[i]],        paste0("Austrian/data/splits/y_test_ground_split_", i, ".csv"), row.names = TRUE)
 }
