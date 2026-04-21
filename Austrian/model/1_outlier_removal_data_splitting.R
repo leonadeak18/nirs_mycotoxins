@@ -18,20 +18,20 @@ colnames(y_raw) <- c("DON", "Total_DON")
 
 #Outlier detection
 library(mdatools)
-outlier_intact <- pca(spectra$intact, ncomp = 3)
-plotCumVariance(outlier_intact, show.label = TRUE) ## 3 components explain > 99% of variance
-plotDistances(outlier_intact, show.label = TRUE) ## outlier on 99631 and 99632
+outlier_intact <- pca(spectra$intact, ncomp = 2)
+plotCumVariance(outlier_intact, show.label = TRUE) ## 2 components explain > 99% of variance
+plotDistances(outlier_intact, show.label = TRUE) ## outlier on 99631
 
-outlier_ground <- pca(spectra$ground, ncomp = 3)
+outlier_ground <- pca(spectra$ground, ncomp = 2)
 plotCumVariance(outlier_ground, show.label = TRUE) ## 3 components explain > 99% of variance
 plotDistances(outlier_ground, show.label = TRUE) ## outlier on 99022 and 99098
 
-#remove the outliers
-spectra$intact <- spectra$intact[!rownames(spectra$intact) %in% c("99631", "99632"), ]
-spectra$ground <- spectra$ground[!rownames(spectra$ground) %in% c("99022", "99098"), ]
+#remove the outliers on both intact and ground
+spectra$intact <- spectra$intact[!rownames(spectra$intact) %in% c("99631", "99022", "99098"), ]
+spectra$ground <- spectra$ground[!rownames(spectra$ground) %in% c("99631", "99022", "99098"), ]
 y <- list(
-  intact = y_raw[!rownames(y_raw) %in% c("99631", "99632"), ],
-  ground = y_raw[!rownames(y_raw) %in% c("99022", "99098"), ]
+  intact = y_raw[!rownames(y_raw) %in% c("99631", "99022", "99098"), ],
+  ground = y_raw[!rownames(y_raw) %in% c("99631", "99022", "99098"), ]
 )
 
 library(caret)
@@ -39,6 +39,9 @@ library(caret)
 ## Create the stratification factor
 distribution_intact <- as.factor(ifelse(y$intact$DON < 1000, "LC", "HC"))
 distribution_ground <- as.factor(ifelse(y$ground$DON < 1000, "LC", "HC"))
+
+summary(distribution_intact)
+summary(distribution_ground)
 
 ## Creates all 10 splits at once
 set.seed(270725)
