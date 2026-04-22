@@ -273,7 +273,7 @@ for (cfg in run_configs) {
   )
   
   # Save the results
-  output_path <- file.path("./Austrian/results", cfg$output)
+  output_path <- file.path("./Austrian/results/reproduce_test2", cfg$output)
   write.csv(binary_plsda_results, output_path, row.names = FALSE)
   
   message(sprintf("Saved results to %s\n", output_path))
