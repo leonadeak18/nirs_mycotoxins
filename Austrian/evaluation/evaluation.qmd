@@ -92,10 +92,10 @@ f1_pipelines_df <- f1_pipelines_df[order(-f1_pipelines_df$response), ]
 ```{r}
 ## Import all results
 ds_data <- list(
-    "binary_1000" = read.csv("./Austrian/results/reproduce_test2/plsda_1000_all.csv"),
-    "binary_1250" = read.csv("./Austrian/results/reproduce_test2/plsda_1250_all.csv"),
-    "weighted_1000" = read.csv("./Austrian/results/reproduce_test2/weighted_plsda_1000_all.csv"),
-    "weighted_1250" = read.csv("./Austrian/results/reproduce_test2/weighted_plsda_1250_all.csv")
+    "binary_1000" = read.csv("./Austrian/results/plsda_1000_all.csv"),
+    "binary_1250" = read.csv("./Austrian/results/plsda_1250_all.csv"),
+    "weighted_1000" = read.csv("./Austrian/results/weighted_plsda_1000_all.csv"),
+    "weighted_1250" = read.csv("./Austrian/results/weighted_plsda_1250_all.csv")
 )
 
 # remove all column except 1 - 5 and 15
@@ -205,7 +205,7 @@ library(lme4)
 library(lmerTest)
 library(emmeans)
 # # Fit the linear mixed-effects model until three-way interaction
-model_ds_mcc <- lmer(MCC_z ~ (Grinding + Weighting + Toxin + Preprocessing + Variable_Selection)^2 + (1|Split), data = lme_ds_data)
+model_ds_mcc <- lmer(MCC ~ (Grinding + Weighting + Toxin + Preprocessing + Variable_Selection)^2 + (1|Split), data = lme_ds_data)
 anova(model_ds_mcc)
 summary(model_ds_mcc)
 
@@ -231,9 +231,6 @@ qqnorm(resid(model_f1))
 qqline(resid(model_f1))
 plot(model_f1, which = 1)
 
-model_f1_fixed <- lm(F1_score ~ Grinding + Toxin + Preprocessing + Variable_Selection + Weighting,
-                     data = lme_ds_data)
-
 anova(model_f1, model_f1_fixed)
 
 car::vif(lm(F1_score ~ Grinding + Toxin + Preprocessing + Variable_Selection + Weighting,
@@ -246,7 +243,7 @@ performance::icc(model_f1)
 
 
 #select the best pipelines
-best_pipelines_f1 <- emmeans(model_f1, pairwise ~ Grinding + Toxin + Preprocessing + Variable_Selection + Weighting, type = "response")
+best_pipelines_f1 <- emmeans(model_f1, pairwise ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^2, type = "response")
 f1_pipelines_df <- as.data.frame(best_pipelines_f1$emmeans)
 f1_pipelines_df <- f1_pipelines_df[order(-f1_pipelines_df$emmean), ]
 
@@ -256,7 +253,7 @@ anova(model_tpr)
 summary(model_tpr)
 
 #select the best pipelines
-best_pipelines_tpr <- emmeans(model_tpr, pairwise ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^3)
+best_pipelines_tpr <- emmeans(model_tpr, pairwise ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Weighting)^2)
 tpr_pipelines_df <- as.data.frame(best_pipelines_tpr$emmeans)
 tpr_pipelines_df <- tpr_pipelines_df[order(-tpr_pipelines_df$emmean), ]
 

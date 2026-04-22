@@ -73,18 +73,40 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
           class_0_idx <- which(y_train == "0")
           class_1_idx <- which(y_train == "1")
           
-          # Find the size of the minority class
+          # Target minority size
           min_class_size <- min(length(class_0_idx), length(class_1_idx))
           
-          # Sample both classes to match the minority size
-          # Lock seed using material and toxin to prevent identical sampling across datasets
+          # Smart sampling function to protect boundary samples
+          smart_downsample <- function(class_idx, target_size, weights) {
+            # If no downsampling needed, return all
+            if (length(class_idx) <= target_size) return(class_idx)
+            
+            # If not using triangle weights, just randomly sample
+            if (is.null(weights)) return(sample(class_idx, target_size))
+            
+            # Identify "Uncertain" (weight < 1) vs "Certain" (weight == 1)
+            class_weights <- weights[class_idx]
+            uncertain_idx <- class_idx[class_weights < 1]
+            certain_idx   <- class_idx[class_weights == 1]
+            
+            # Prioritize keeping ALL uncertain boundary samples
+            if (length(uncertain_idx) >= target_size) {
+              return(sample(uncertain_idx, target_size)) 
+            } else {
+              needed_from_certain <- target_size - length(uncertain_idx)
+              sampled_certain <- sample(certain_idx, needed_from_certain)
+              return(c(uncertain_idx, sampled_certain))
+            }
+          }
+          
+          # Lock seed for reproducibility
           combo_downsample_seed <- current_seed + match(material, materials) * 1000L + match(toxin, target_toxins) * 100L
           set.seed(combo_downsample_seed) 
           
-          down_class_0_idx <- sample(class_0_idx, min_class_size)
-          down_class_1_idx <- sample(class_1_idx, min_class_size)
+          down_class_0_idx <- smart_downsample(class_0_idx, min_class_size, w_train)
+          down_class_1_idx <- smart_downsample(class_1_idx, min_class_size, w_train)
           
-          # Combine and subset
+          # Combine and subset the final training pools
           down_idx <- c(down_class_0_idx, down_class_1_idx)
           
           X_train_raw <- X_train_raw[down_idx, , drop = FALSE]

@@ -36,9 +36,22 @@ y <- list(
 
 library(caret)
 
-## Create the stratification factor
-distribution_intact <- as.factor(ifelse(y$intact$DON < 1000, "LC", "HC"))
-distribution_ground <- as.factor(ifelse(y$ground$DON < 1000, "LC", "HC"))
+threshold <- 1000
+uncertainty <- 0.5
+lower_bound <- threshold / (1 + uncertainty)  # ~666.67
+upper_bound <- threshold / (1 - uncertainty)  # 2000
+
+# Create a 3-tier stratification factor 
+# This forces caret to sample evenly from the extremes AND the muddy middle
+distribution_intact <- as.factor(
+  ifelse(y$intact$DON <= lower_bound, "Certain_LC",
+  ifelse(y$intact$DON >= upper_bound, "Certain_HC", "Uncertain"))
+)
+
+distribution_ground <- as.factor(
+  ifelse(y$ground$DON <= lower_bound, "Certain_LC",
+  ifelse(y$ground$DON >= upper_bound, "Certain_HC", "Uncertain"))
+)
 
 summary(distribution_intact)
 summary(distribution_ground)
