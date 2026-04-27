@@ -1,3 +1,5 @@
+library(dplyr)
+
 # Prepare the dataframe
 prepare_df <- function(input, r1, r2){
   if (r1 > r2) {
@@ -10,6 +12,7 @@ prepare_df <- function(input, r1, r2){
   colnames(df) <- sub("^X", "", colnames(df))
   cols <- as.numeric(colnames(df))
   output <- df[, cols >= r1 & cols <= r2]
+  output <- as.data.frame(output)
   rownames(output) <- samples
 
   return(output)
@@ -19,56 +22,84 @@ binary_transform <- function(y, threshold = 1000, targets = c("DON", "Total_DON"
   y_class <- list()
   for (target in targets) {
     # Binary classification
-    y_class[[target]] <- cut(
+    cls <- cut(
       y[[target]],
       breaks = c(-Inf, threshold, Inf),
       labels = c("LC", "HC")
     )
-    names(y_class[[target]]) <- rownames(y)
+    y_class[[target]] <- data.frame(
+      Class = cls,
+      Weight = 1,  # Assign a default weight of 1 for all samples
+      row.names = rownames(y)
+    )
   }  
   return(y_class)
 }
 
-three_level_transform <- function(df, cutoff = 1000, uncertainty_percent = 0.5) {
-  output <- data.frame(
-    X = df[, 1],
-    class = factor(ifelse(df[, 2] > cutoff * (1 + uncertainty_percent), "HC",
-                          ifelse(df[, 2] < cutoff * (1 - uncertainty_percent), "LC", "UC")))
-  )
-  rownames(output) <- output$X
-  output <- output[, -1, drop = FALSE]
-  
-  return(output)
-}
-
-binary_transform_with_weight <- function(y, threshold = 1000, uncertainty = 0.5, targets = c("DON", "Total_DON")) {
+binary_transform_with_prob <- function(y, threshold = 1000, uncertainty = 0.5, targets = c("DON", "Total_DON")) {
   y_class <- list()
-  
-  certainty_multiplier <- 1.0 - uncertainty
-  gray_area_width <- threshold * uncertainty
-  
   for (target in targets) {
-    # 1. Extract the column as a numeric vector
+    # Extract the column as a numeric vector
     val <- y[[target]]
     
-    # 2. Binary classification
+    # Binary classification
     cls <- cut(
       val,
       breaks = c(-Inf, threshold, Inf),
       labels = c("LC", "HC")
     )
     
-    # 3. Distance from threshold (using the numeric vector 'val')
-    raw_dist <- abs(val - threshold)
-    
-    # 4. Scale and clip between 0 and 2 (so that after multiplying by certainty_multiplier, it maxes out at 1.0)
-    dist_weight <- pmin(pmax(raw_dist / gray_area_width, 0), 2)
-    final_weight <- dist_weight * certainty_multiplier
-    
+    # determine the weight
+    stdev <- val * (uncertainty / 2)
+    z_score <- abs(threshold - val) / stdev
+    final_weight <- pnorm(z_score)
+
     # 5. Store as a data frame within the list to hold both values
     y_class[[target]] <- data.frame(
       Class = cls,
       Weight = final_weight,
+      row.names = rownames(y)
+    )
+  }
+  
+  return(y_class)
+}
+
+binary_transform_with_triangle <- function(y, threshold = 1000, uncertainty = 0.5, targets = c("DON", "Total_DON")) {
+  y_class <- list()
+  
+  for (target in targets) {
+    # Extract the column
+    val <- y[[target]]
+    
+    # Binary classification
+    cls <- cut(
+      val,
+      breaks = c(-Inf, threshold, Inf),
+      labels = c("LC", "HC")
+    )
+    
+    # Determine the upper and lower bounds based on relative uncertainty
+    upper_bound <- threshold / (1 - uncertainty)
+    lower_bound <- threshold / (1 + uncertainty)
+    
+    # Calculate the slopes
+    lower_slope <- 1 / (threshold - lower_bound)
+    upper_slope <- 1 / (upper_bound - threshold)
+
+    # Fully vectorized weight calculation
+    weight <- case_when(
+      val <= lower_bound ~ 1,                             # 100% certain it is LC
+      val >= upper_bound ~ 1,                             # 100% certain it is HC
+      val < threshold    ~ lower_slope * (threshold - val),  # Scales down to 0 as it approaches threshold from below
+      val > threshold    ~ upper_slope * (val - threshold),  # Scales down to 0 as it approaches threshold from above
+      val == threshold   ~ 0                              # Exactly on the line = 0% certainty
+    )
+    
+    # Store as a data frame
+    y_class[[target]] <- data.frame(
+      Class = cls,
+      Weight = weight,
       row.names = rownames(y)
     )
   }

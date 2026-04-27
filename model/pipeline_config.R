@@ -1,8 +1,11 @@
-load_nirs_data <- function(splits = 10, threshold = 1000, weighted = FALSE) {
+load_nirs_data <- function(splits = 100, threshold = 1000, 
+                           weighted = c("none", "prob", "triangle")[1],
+                           toxins = c("DON", "Total_DON"),
+                          material = c('intact', 'ground'), base_path = "./data/train_test_set_austrian/") {
   source("./utils/preparation.R")
   # --- Setup Metadata ---
-  sources <- c('intact', 'ground')
-  targets <- c('DON', 'Total_DON')
+  sources <- material
+  targets <- toxins
   
   # Initialize nested lists to hold the data
   X_train <- list(); X_test <- list()
@@ -19,35 +22,28 @@ load_nirs_data <- function(splits = 10, threshold = 1000, weighted = FALSE) {
     test_country[[source]] <- list()
     
     for (i in 1:splits) {
-      # Handle indexing: Python range(10) is 0-9. 
-      # In R, 1:10 is 1-10, so we subtract 1 for the file name.
-      idx <- i - 1
-      
-      # Define file paths
-      base_path <- "nirs/train_test_set/"
-      
+      split_num <- sprintf("%03d", i)
       # Load raw data
-      X_train[[source]][[i]] <- read.csv(paste0(base_path, "X_train_", source, "_split_", idx, ".csv"), row.names = 1)
+      X_train[[source]][[i]] <- read.csv(paste0(base_path, "X_", source, "_train_", split_num, ".csv"), row.names = 1)
       colnames(X_train[[source]][[i]]) <- sub("^X", "", colnames(X_train[[source]][[i]]))
 
-      X_test[[source]][[i]]  <- read.csv(paste0(base_path, "X_test_", source, "_split_", idx, ".csv"), row.names = 1)
+      X_test[[source]][[i]]  <- read.csv(paste0(base_path, "X_", source, "_test_", split_num, ".csv"), row.names = 1)
       colnames(X_test[[source]][[i]]) <- sub("^X", "", colnames(X_test[[source]][[i]]))
 
-      y_train_raw <- read.csv(paste0(base_path, "y_train_", source, "_split_", idx, ".csv"), row.names = 1)
-      y_test_raw  <- read.csv(paste0(base_path, "y_test_", source, "_split_", idx, ".csv"), row.names = 1)
+      y_train_raw <- read.csv(paste0(base_path, "y_train_", split_num, ".csv"), row.names = 1)
+      y_test_raw  <- read.csv(paste0(base_path, "y_test_", split_num, ".csv"), row.names = 1)
       
       # Transform to binary
-      if (weighted) {
-        y_tr_bin[[source]][[i]] <- binary_transform_with_weight(y_train_raw, threshold = threshold, targets = targets)
-        y_te_bin[[source]][[i]] <- binary_transform_with_weight(y_test_raw, threshold = threshold, targets = targets)
+      if (weighted == "prob") {
+        y_tr_bin[[source]][[i]] <- binary_transform_with_prob(y_train_raw, threshold = threshold, targets = targets)
+        y_te_bin[[source]][[i]] <- binary_transform_with_prob(y_test_raw, threshold = threshold, targets = targets)
+      } else if (weighted == "triangle") {
+        y_tr_bin[[source]][[i]] <- binary_transform_with_triangle(y_train_raw, threshold = threshold, targets = targets)
+        y_te_bin[[source]][[i]] <- binary_transform_with_triangle(y_test_raw, threshold = threshold, targets = targets)
       } else {
         y_tr_bin[[source]][[i]] <- binary_transform(y_train_raw, threshold = threshold, targets = targets)
         y_te_bin[[source]][[i]] <- binary_transform(y_test_raw, threshold = threshold, targets = targets)
       }
-      
-      # Extract country
-      train_country[[source]][[i]] <- y_train_raw$Country
-      test_country[[source]][[i]]  <- y_test_raw$Country
     }
   }
   
@@ -56,9 +52,7 @@ load_nirs_data <- function(splits = 10, threshold = 1000, weighted = FALSE) {
     X_train = X_train,
     X_test = X_test,
     y_train = y_tr_bin,
-    y_test = y_te_bin,
-    train_country = train_country,
-    test_country = test_country
+    y_test = y_te_bin
   ))
 }
 
