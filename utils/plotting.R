@@ -15,7 +15,7 @@ plot_spectra <- function(spectra, title, y_label = "log (1/R)", color) {
   if (n_groups == 2) {
     output <- output + scale_color_manual(values = c("#1982c4", "#ef233c"))
   } else if (n_groups == 4) {
-    output <- output + scale_fill_manual(values = c("#1982c4", "#ef233c", "#b6d5e9", "#f7c1bb"))
+    output <- output + scale_color_manual(values = c("#1982c4", "#ef233c", "#b6d5e9", "#f7c1bb"))
   } else {
     output <- output + scale_color_viridis_d() # default color palette for more than 4 categories
   }
@@ -67,7 +67,7 @@ plot_pca <- function(input, input2, title, color, shape = NULL) {
   if (n_groups == 2) {
     output <- output + scale_color_manual(values = c("#1982c4", "#ef233c"))
   } else if (n_groups == 4) {
-    output <- output + scale_fill_manual(values = c("#1982c4", "#ef233c", "#b6d5e9", "#f7c1bb"))
+    output <- output + scale_color_manual(values = c("#1982c4", "#ef233c", "#b6d5e9", "#f7c1bb"))
   } else {
     output <- output + scale_color_viridis_d() # default color palette for more than 4 categories
   }
@@ -106,7 +106,7 @@ plot_stacked_counts <- function(data, x_var, fill_var, title = NULL, x_label = N
   if (n_groups == 2) {
     output <- output + scale_fill_manual(values = c("#1982c4", "#ef233c"))
   } else if (n_groups == 4) {
-    output <- output + scale_fill_manual(values = c("#1982c4", "#ef233c", "#b6d5e9", "#f7c1bb"))
+    output <- output + scale_fill_manual(values = c("#1982c4", "#b6d5e9", "#f7c1bb", "#ef233c"))
   } else {
     output <- output + scale_fill_viridis_d() # default color palette for more than 4 categories
   }

@@ -1,0 +1,130 @@
+---
+title: "Untitled"
+format: html
+---
+
+# Hierarchical PLS_DA Evaluation
+# Evaluation on F1-Score and MCC on Overall
+```{r}
+## Import all results
+initial_data <- list(
+    "all_binary_1000" = read.csv("results/mixed_all/plsda_1000_all.csv"),
+    "all_binary_1250" = read.csv("results/mixed_all/plsda_1250_all.csv"),
+    "all_weighted_1000" = read.csv("results/mixed_all/weighted_plsda_1000_all.csv"),
+    "all_weighted_1250" = read.csv("results/mixed_all/weighted_plsda_1250_all.csv"),
+    "austrian_binary_1000" = read.csv("results/austrian/plsda_1000_all.csv"),
+    "austrian_binary_1250" = read.csv("results/austrian/plsda_1250_all.csv"),
+    "austrian_weighted_1000" = read.csv("results/austrian/weighted_plsda_1000_all.csv"),
+    "austrian_weighted_1250" = read.csv("results/austrian/weighted_plsda_1250_all.csv")
+)
+
+# remove all column except 1 - 5 and 15
+data <- lapply(initial_data, function(df) df[, c(1:6, 10:13, 17,18)])
+
+# add details about the sample_weight
+data <- Map(function(df, nm) {
+  df$Sample_weight <- if (grepl("weighted", nm, ignore.case = TRUE)) {
+    "TRUE"
+  } else {
+    "FALSE"
+  }
+  df
+}, data, names(data))
+
+## add details about the dataset
+data <- Map(function(df, nm) {
+  df$Dataset <- if (grepl("austrian", nm, ignore.case = TRUE)) {
+    "Austrian"
+  } else {
+    "All"
+  }
+  df
+}, data, names(data))
+
+# combine all dataframes into one
+combined_data <- do.call(rbind, data)
+
+# except F1_Score and MCC, transform all to factor
+combined_data[c(1:6, 13,14)] <- lapply(combined_data[c(1:6, 13,14)], as.factor)
+str(combined_data)
+
+#transform MCC using Fisher's z transformation and add TPR and TNR
+combined_data$MCC_z <- atanh(combined_data$MCC)
+combined_data$TPR <- combined_data$TP / (combined_data$TP + combined_data$FN)
+combined_data$TNR <- combined_data$TN / (combined_data$TN + combined_data$FP)
+
+#rename the columns
+library(dplyr)
+lme_data <- combined_data %>%
+ rename(
+   Grinding = Sample_source,
+   Toxin = Target_toxin,
+   Weighting = Sample_weight
+ )
+```
+
+## Analysis using Linear mixed-effects
+This experiment is performed using Full Factorial Design with 5 factors: Sample_weight, Target_toxin, Preprocessing, Variable_Selection and Sample_weight.
+
+```{r}
+#### Data analysis for MCC_z
+library(lme4)
+library(lmerTest)
+library(emmeans)
+#Fit the linear mixed-effects model until three-way interaction
+str(lme_data)
+model_mcc <- lmer(MCC_z ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Downsampled + Dataset + Weighting)^3 + (1|Split), data = lme_data)
+anova(model_mcc)
+summary(model_mcc)
+
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model_mcc)
+r2(model_mcc)
+
+#select the best pipelines
+best_pipelines_mcc <- emmeans(model_mcc, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Downsampled * Dataset * Weighting, pbkrtest.limit = 12800)
+mcc_pipelines_df <- as.data.frame(best_pipelines_mcc$emmeans)
+mcc_pipelines_df <- mcc_pipelines_df[order(-mcc_pipelines_df$emmean), ]
+
+
+# Data analysis for F1_Score
+model_f1 <- lmer(F1_score ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Downsampled + Dataset + Weighting)^3 + (1|Split), data = lme_data)
+anova(model_f1)
+summary(model_f1)
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model_f1)
+r2(model_f1)
+
+#select the best pipelines
+best_pipelines_f1 <- emmeans(model_f1, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Downsampled * Dataset * Weighting, pbkrtest.limit = 12800)
+f1_pipelines_df <- as.data.frame(best_pipelines_f1$emmeans)
+f1_pipelines_df <- f1_pipelines_df[order(-f1_pipelines_df$emmean), ]
+
+
+# Data analysis for TPR
+model_tpr <- lmer(TPR ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Downsampled + Dataset + Weighting)^3 + (1|Split), data = lme_data)
+anova(model_tpr)
+summary(model_tpr)
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model_tpr)
+r2(model_tpr) 
+
+#select the best pipelines
+best_pipelines_tpr <- emmeans(model_tpr, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Downsampled * Dataset * Weighting, pbkrtest.limit = 12800)
+tpr_pipelines_df <- as.data.frame(best_pipelines_tpr$emmeans)
+tpr_pipelines_df <- tpr_pipelines_df[order(-tpr_pipelines_df$emmean), ]
+
+
+# Data analysis for TNR
+model_tnr <- lmer(TNR ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Downsampled + Dataset + Weighting)^3 + (1|Split), data = lme_data)
+anova(model_tnr)
+summary(model_tnr)
+
+# select the best pipelines
+best_pipelines_tnr <- emmeans(model_tnr, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Downsampled * Dataset * Weighting, pbkrtest.limit = 12800)
+tnr_pipelines_df <- as.data.frame(best_pipelines_tnr$emmeans)
+tnr_pipelines_df <- tnr_pipelines_df[order(-tnr_pipelines_df$emmean), ]
+```

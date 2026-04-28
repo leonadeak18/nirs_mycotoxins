@@ -22,14 +22,16 @@ X_initial <- list(
 y_initial <- read_excel("data/nirs_intact.xlsx") %>%
     column_to_rownames("Sample_ID") %>% select(1:12)
 
-# transform Deoxynivalenol and Total DOn to binary variables based on the threshold of 1000 ppb and 1250 ppb, respectively
+# transform Deoxynivalenol and Total DON to binary variables based on the threshold of 1000 ppb and 1250 ppb, respectively.
+# the uncertainty level of DON is 30% (Ur)
 # C: compliant, NC: non-compliant, U: uncertain
+uncertainty <- 0.3
 y_initial <- y_initial %>%
     mutate(DON_2 = ifelse(Deoxynivalenol < 1000, "C", "NC"),
            Total_DON_2 = ifelse(`Total DON` < 1250, "C", "NC"))
 y_initial <- y_initial %>%
-    mutate(DON_4 = ifelse(Deoxynivalenol < (1000/1.5), "C", ifelse(Deoxynivalenol > (1000/0.5), "NC", ifelse(Deoxynivalenol < (1000/0.5) & Deoxynivalenol > 1000, "UNC", "UC"))),
-           Total_DON_4 = ifelse(`Total DON` < (1250/1.5), "C", ifelse(`Total DON` > (1250/0.5), "NC", ifelse(`Total DON` < (1250/0.5) & `Total DON` > 1250, "UNC", "UC"))))
+    mutate(DON_4 = ifelse(Deoxynivalenol < (1000 * (1 - uncertainty)), "C", ifelse(Deoxynivalenol > (1000 * (1 + uncertainty)), "NC", ifelse(Deoxynivalenol < (1000 * (1 + uncertainty)) & Deoxynivalenol > 1000, "UNC", "UC"))),
+           Total_DON_4 = ifelse(`Total DON` < (1250 * (1 - uncertainty)), "C", ifelse(`Total DON` > (1250 * (1 + uncertainty)), "NC", ifelse(`Total DON` < (1250 * (1 + uncertainty)) & `Total DON` > 1250, "UNC", "UC"))))
 cols <- c("year", "Country", "DON_2", "Total_DON_2", "DON_4", "Total_DON_4")
 y_initial[cols] <- lapply(y_initial[cols], as.factor)
 str(y_initial)

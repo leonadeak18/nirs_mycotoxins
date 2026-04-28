@@ -52,7 +52,10 @@ binary_transform_with_prob <- function(y, threshold = 1000, uncertainty = 0.5, t
     # determine the weight
     stdev <- val * (uncertainty / 2)
     z_score <- abs(threshold - val) / stdev
-    final_weight <- pnorm(z_score)
+
+    #scale the 0.5 to 1 probability range to 0 - 1 weight range
+    raw_weight <- (pnorm(z_score) - 0.5) * 2
+    final_weight <- ifelse(raw_weight > 0.95, 1, raw_weight)
 
     # 5. Store as a data frame within the list to hold both values
     y_class[[target]] <- data.frame(
