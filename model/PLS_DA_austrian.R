@@ -217,8 +217,8 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
 run_configs <- list(
   list(threshold = 1000, weighted = "none",     toxin = "DON",       output = "plsda_1000_all.csv"),
   list(threshold = 1250, weighted = "none",     toxin = "Total_DON", output = "plsda_1250_all.csv"),
-  list(threshold = 1000, weighted = "triangle", toxin = "DON",       output = "weighted_plsda_1000_all.csv"),
-  list(threshold = 1250, weighted = "triangle", toxin = "Total_DON", output = "weighted_plsda_1250_all.csv")
+  list(threshold = 1000, weighted = "prob", toxin = "DON",       output = "weighted_plsda_1000_all.csv"),
+  list(threshold = 1250, weighted = "prob", toxin = "Total_DON", output = "weighted_plsda_1250_all.csv")
 )
 
 # Loop through each configuration
@@ -231,7 +231,7 @@ for (cfg in run_configs) {
   set.seed(270725)
   current_nirs_data <- load_nirs_data(weighted = cfg$weighted, threshold = cfg$threshold, base_path = "./data/train_test_set_austrian/")
   
-  use_weights_flag <- (cfg$weighted == "triangle")
+  use_weights_flag <- (cfg$weighted == "prob")
   
   message("Running Phase 1: Without Downsampling...")
   res_no_ds <- pipeline_binary_plsda_sequential(

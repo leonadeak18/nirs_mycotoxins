@@ -36,7 +36,7 @@ binary_transform <- function(y, threshold = 1000, targets = c("DON", "Total_DON"
   return(y_class)
 }
 
-binary_transform_with_prob <- function(y, threshold = 1000, uncertainty = 0.5, targets = c("DON", "Total_DON")) {
+binary_transform_with_prob <- function(y, threshold = 1000, uncertainty = 0.3, targets = c("DON", "Total_DON")) {
   y_class <- list()
   for (target in targets) {
     # Extract the column as a numeric vector
@@ -50,7 +50,7 @@ binary_transform_with_prob <- function(y, threshold = 1000, uncertainty = 0.5, t
     )
     
     # determine the weight
-    stdev <- val * (uncertainty / 2)
+    stdev <- threshold * (uncertainty / 2)
     z_score <- abs(threshold - val) / stdev
 
     #scale the 0.5 to 1 probability range to 0 - 1 weight range
@@ -68,7 +68,7 @@ binary_transform_with_prob <- function(y, threshold = 1000, uncertainty = 0.5, t
   return(y_class)
 }
 
-binary_transform_with_triangle <- function(y, threshold = 1000, uncertainty = 0.5, targets = c("DON", "Total_DON")) {
+binary_transform_with_triangle <- function(y, threshold = 1000, uncertainty = 0.3, targets = c("DON", "Total_DON")) {
   y_class <- list()
   
   for (target in targets) {
