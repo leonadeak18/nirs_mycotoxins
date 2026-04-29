@@ -253,7 +253,7 @@ for (cfg in run_configs) {
   combined_results <- rbind(res_no_ds, res_with_ds)
   
   # Save the results
-  output_path <- file.path("./results/triangle/austrian/", cfg$output)
+  output_path <- file.path("./results/triangle/austrian/R2/", cfg$output)
   write.csv(combined_results, output_path, row.names = FALSE)
   
   message(sprintf("Saved combined results to %s\n", output_path))
