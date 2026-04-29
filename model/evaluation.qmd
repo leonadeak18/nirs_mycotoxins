@@ -128,3 +128,96 @@ best_pipelines_tnr <- emmeans(model_tnr, pairwise ~ Grinding * Toxin * Preproces
 tnr_pipelines_df <- as.data.frame(best_pipelines_tnr$emmeans)
 tnr_pipelines_df <- tnr_pipelines_df[order(-tnr_pipelines_df$emmean), ]
 ```
+
+
+```{r}
+# Load your libraries
+library(ggplot2)
+library(ggpubr) # For the comparison stars
+
+# 1. Main Effect Plot
+# Load your libraries
+library(ggplot2)
+library(ggpubr)
+
+# Create the beautiful Violin + Boxplot combo
+ggplot(lme_data, aes(x = Weighting, y = MCC, fill = Weighting)) +
+  # The violin layer (trim = FALSE keeps the beautiful natural tails)
+  geom_violin(alpha = 0.7, trim = FALSE, color = NA) +
+  # The tiny inner boxplot (width = 0.1 keeps it slim)
+  geom_boxplot(width = 0.1, fill = "white", color = "black", outlier.shape = NA) +
+  # Your custom colors
+  scale_fill_manual(values = c("FALSE" = "#fca311", "TRUE" = "#14213d")) +
+  theme_minimal() +
+  labs(
+    title = "Distribution of MCC by Weighting",
+    subtitle = "Violin shapes show the full density of your 12,800 data points",
+    x = "Was Weighting Applied?",
+    y = "MCC Score"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "none" # Hide the legend for a cleaner look
+  ) +
+  # Adding those helpful significance stars back in!
+  stat_compare_means(
+    comparisons = list(c("FALSE", "TRUE")), 
+    label = "p.signif", 
+    method = "t.test"
+  )
+
+# 2. Interaction Plot (Swapping X and Fill for cleaner brackets)
+ggplot(lme_data, aes(x = Toxin, y = MCC, fill = Weighting)) +
+  # Dodged violins to sit them next to each other
+  geom_violin(position = position_dodge(width = 0.8), alpha = 0.7, trim = FALSE, color = NA) +
+  # Dodged inner boxplots
+  geom_boxplot(position = position_dodge(width = 0.8), width = 0.1, fill = "white", color = "black", outlier.shape = NA) +
+  scale_fill_manual(values = c("FALSE" = "#fca311", "TRUE" = "#14213d")) +
+  theme_minimal() +
+  labs(
+    title = "Density of MCC Scores by Toxin and Weighting",
+    x = "Toxin Type",
+    y = "MCC Score",
+    fill = "Weighting Applied?"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "bottom"
+  ) +
+  # Adding the stars for the groups
+  stat_compare_means(
+    aes(group = Weighting), 
+    label = "p.signif", 
+    method = "t.test"
+  )
+
+str(mcc_pipelines_df)
+
+library(ggplot2)
+
+library(emmeans)
+library(ggplot2)
+
+# 1. Calculate the marginal mean for JUST Weighting
+emm_weighting <- emmeans(model_f1, ~ Weighting, pbkrtest.limit = 12800)
+emm_weighting_df <- as.data.frame(emm_weighting)
+str(emm_weighting_df)
+# 2. Plot the isolated effect
+ggplot(emm_weighting_df, aes(x = Weighting, y = emmean, color = Weighting)) +
+  # Draw the error bar
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.1, size = 1) +
+  # Draw the point estimate
+  geom_point(size = 4) +
+  scale_color_manual(values = c("FALSE" = "#fca311", "TRUE" = "#14213d")) +
+  theme_minimal() +
+  labs(
+    title = "Main Effect of Weighting",
+    subtitle = "Model-adjusted marginal means (with 95% CIs)",
+    x = "Was Weighting Applied?",
+    y = "Estimated MCC"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "none"
+  )
+```

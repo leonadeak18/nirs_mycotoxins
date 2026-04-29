@@ -83,8 +83,8 @@ binary_transform_with_triangle <- function(y, threshold = 1000, uncertainty = 0.
     )
     
     # Determine the upper and lower bounds based on relative uncertainty
-    upper_bound <- threshold / (1 - uncertainty)
-    lower_bound <- threshold / (1 + uncertainty)
+    upper_bound <- threshold + (threshold * uncertainty)
+    lower_bound <- threshold - (threshold * uncertainty)
     
     # Calculate the slopes
     lower_slope <- 1 / (threshold - lower_bound)
