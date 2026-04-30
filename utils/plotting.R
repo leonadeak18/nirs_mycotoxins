@@ -101,7 +101,11 @@ plot_stacked_counts <- function(data, x_var, fill_var, title = NULL, x_label = N
             labs(title = title, x = x_label, y = "Count") +
             theme(
               legend.position = "top",
-              legend.title = element_blank()
+              legend.title = element_blank(),
+              legend.text = element_text(size = 14),
+              plot.title = element_text(size = 16),
+              axis.text = element_text(size = 14),
+              axis.title = element_text(size = 16)
             )
   if (n_groups == 2) {
     output <- output + scale_fill_manual(values = c("#1982c4", "#ef233c"))

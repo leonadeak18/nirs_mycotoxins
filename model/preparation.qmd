@@ -15,12 +15,12 @@ library(dplyr)
 library(tibble)
 X_initial <- list(
     intact = read_excel("data/nirs_intact.xlsx") %>%
-    column_to_rownames("Sample_ID") %>% select(-(1:12), -("400":"1099.5")),
+    column_to_rownames("Sample_ID") %>% dplyr::select(-(1:12), -("400":"1099.5")),
     ground = read_excel("data/nirs_milled.xlsx") %>%
-    column_to_rownames("Sample_ID") %>% select(-("400":"1099.5"))
+    column_to_rownames("Sample_ID") %>% dplyr::select(-("400":"1099.5"))
 )
 y_initial <- read_excel("data/nirs_intact.xlsx") %>%
-    column_to_rownames("Sample_ID") %>% select(1:12)
+    column_to_rownames("Sample_ID") %>% dplyr::select(1:12)
 
 # transform Deoxynivalenol and Total DON to binary variables based on the threshold of 1000 ppb and 1250 ppb, respectively.
 # the uncertainty level of DON is 30% (Ur)

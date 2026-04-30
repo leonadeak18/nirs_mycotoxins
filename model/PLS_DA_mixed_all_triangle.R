@@ -10,7 +10,6 @@ library(rchemo)
 library(pROC)
 library(prospectr)
 library(PRROC)
-library(plsVarSel)
 
 # Define preprocessing methods
 prep_methods <- list(
@@ -18,17 +17,17 @@ prep_methods <- list(
   '1st_Der'     = function(x) savitzkyGolay(x, w = 15, p = 2, m = 1)
 )
 
-# Define variable selection methods
 varsel_methods <- list(
-  "None" = function(x, y, max_comp, k_folds, cur_seed){ 1:ncol(x) },
-  "VIP"  = function(x, y, max_comp, k_folds, cur_seed) {
-      set.seed(cur_seed)
-      df <- filterPLSR(y, x, ncomp = max_comp, ncomp.opt = "minimum", validation = "CV", segments = k_folds, VIP.threshold = 1)
-      return(df$VIP)
+  "None" = function(x, y, opt_nlv, weights) {
+    1:ncol(x)
+  },
+  "VIP" = function(x, y, opt_nlv, weights) {
+    fm  <- plsrda(X = x, y = y, weights = weights, nlv = opt_nlv)
+    vip_scores <- vip(fm, x, y, nlv = opt_nlv)[, sprintf("comp %d", opt_nlv)]
+    return(which(vip_scores > 1))
   }
 )
 
-# Refactored pipeline function 
 pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weights = FALSE, apply_downsampling = TRUE, max_nlv = 25) {
   
   results_list <- list()
@@ -59,7 +58,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
           w_train <- NULL
         }
 
-        # 3. Apply Downsampling (Single-Shot Optimized)
+        # 3. Apply Downsampling
         if (apply_downsampling) {
           class_0_idx <- which(y_train == "0")
           class_1_idx <- which(y_train == "1") # Always minority
@@ -103,7 +102,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
           X_train_prep <- prep_methods[[prep_name]](X_train_raw)
           X_test_prep  <- prep_methods[[prep_name]](X_test_raw)
           
-          for (varsel_name in varsel_names){
+          for (varsel_name in varsel_names) {
             
             combo_seed <- current_seed +
               match(material, materials)       * 10000L +
@@ -112,30 +111,45 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
               match(varsel_name, varsel_names) * 10L
             set.seed(combo_seed)
             
+            # 5. CV on full variable set to find true optimal LV
+            res_nlv_full <- plsr_plsda_allsteps(
+              X = X_train_prep, Xname = NULL, Xscaling = "none",
+              Y = y_train, Yscaling = "none", weights = w_train,
+              newX = NULL, newXname = NULL, method = "plsrda",
+              step = "nlvtest", nlv = max_nlv,
+              modeloutput = c("scores", "loadings", "coef", "vip"),
+              cvmethod = "kfolds", nbrep = 3, seed = combo_seed,
+              nfolds = 10, criterion = "err", selection = "globalmin"
+            )
+            
+            opt_nlv <- which(res_nlv_full$optimum == 1)[1]
+            
+            # 6. Variable selection using rchemo VIP at opt_nlv
             selected_vars <- varsel_methods[[varsel_name]](
-              x = X_train_prep, 
-              y = as.numeric(y_train), 
-              max_comp = max_nlv, k_folds = 10, cur_seed = combo_seed)
-          
+              x       = X_train_prep,
+              y       = y_train,
+              opt_nlv = opt_nlv,
+              weights = w_train
+            )
+            
+            # Guard: if VIP > 1 selects zero variables, fall back to all
+            if (length(selected_vars) == 0) {
+              warning(sprintf(
+                "VIP selected 0 variables for split %d | %s | %s | %s. Falling back to all variables.",
+                i, material, toxin, prep_name
+              ))
+              selected_vars <- 1:ncol(X_train_prep)
+            }
+            
             X_train_prep_sel <- X_train_prep[, selected_vars, drop = FALSE]
             X_test_prep_sel  <- X_test_prep[, selected_vars, drop = FALSE]
             
-            res_nlv <- plsr_plsda_allsteps(
-                      X = X_train_prep_sel, Xname = NULL, Xscaling = "none", 
-                      Y = y_train, Yscaling = "none", weights = w_train,
-                      newX = NULL, newXname = NULL, method = "plsrda",
-                      step = "nlvtest", nlv = max_nlv, 
-                      modeloutput = c("scores","loadings","coef","vip"), 
-                      cvmethod = "kfolds", nbrep = 3, seed = combo_seed, 
-                      nfolds = 10, criterion = "err", selection = "globalmin"
-            )
-            
-            opt_idx <- which(res_nlv$optimum == 1)[1]
-            error_cv    <- res_nlv$err_mean[[opt_idx]]
-            error_cv_sd <- res_nlv$err_sd[[opt_idx]]
-            
-            final_mod <- plsrda(X = X_train_prep_sel, y = y_train, weights = w_train, nlv = opt_idx)
+            # 7. Refit final model on selected variables at opt_nlv
+            final_mod <- plsrda(X = X_train_prep_sel, y = y_train, weights = w_train, nlv = opt_nlv)
             preds     <- predict(final_mod, X_test_prep_sel)
+            
+            error_cv    <- res_nlv_full$err_mean[[opt_nlv]]
+            error_cv_sd <- res_nlv_full$err_sd[[opt_nlv]]
             
             y_test_f <- factor(y_test, levels = c("0", "1"))
             pred_f   <- factor(preds$pred, levels = c("0", "1"))
@@ -166,39 +180,39 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
             scores_hc <- scores_pos[y_test == "1"]
             scores_lc <- scores_pos[y_test == "0"]
             
-            if(length(scores_hc) > 0 && length(scores_lc) > 0) {
+            if (length(scores_hc) > 0 && length(scores_lc) > 0) {
               pr_obj <- pr.curve(scores.class0 = scores_hc, scores.class1 = scores_lc, curve = FALSE)
               pr_auc_val <- pr_obj$auc.integral
             } else {
               pr_auc_val <- NA 
             }
             
-            # --- UPDATED RES_ROW ---
             res_row <- data.frame(
-              Sample_source = material,
-              Target_toxin = toxin,
-              Preprocessing = prep_name,
+              Sample_source      = material,
+              Target_toxin       = toxin,
+              Preprocessing      = prep_name,
               Variable_Selection = varsel_name,
-              Downsampled = apply_downsampling,
-              Split = i,
-              LV = opt_idx,
-              Err_CV = round(error_cv, 4),
-              Err_CV_SD = round(error_cv_sd, 4),
+              Downsampled        = apply_downsampling,
+              Split              = i,
+              LV                 = opt_nlv,
+              N_Vars_Selected    = length(selected_vars),
+              Err_CV             = round(error_cv, 4),
+              Err_CV_SD          = round(error_cv_sd, 4),
               TN = tn, FP = fp, FN = fn, TP = tp,
-              Accuracy = round(acc, 4),
-              Sensitivity = round(sens, 4),
-              Specitifity = round(spec, 4),
-              F1_score = round(f1_val, 4),
-              MCC = round(mcc_val, 4),
-              ROC_AUC = round(auc_val, 4),
-              PR_AUC = round(pr_auc_val, 4),
-              Opt_Threshold = round(opt_thresh, 4)
+              Accuracy           = round(acc, 4),
+              Sensitivity        = round(sens, 4),
+              Specitifity        = round(spec, 4),
+              F1_score           = round(f1_val, 4),
+              MCC                = round(mcc_val, 4),
+              ROC_AUC            = round(auc_val, 4),
+              PR_AUC             = round(pr_auc_val, 4),
+              Opt_Threshold      = round(opt_thresh, 4)
             )
             
             results_list[[length(results_list) + 1]] <- res_row
             ds_label <- ifelse(apply_downsampling, "YES", "NO")
-            cat(sprintf("Done: Split %d | Mat: %s | Tox: %s | DS: %s | Prep: %s | VarSel: %s\n", 
-                        i, material, toxin, ds_label, prep_name, varsel_name))
+            cat(sprintf("Done: Split %d | Mat: %s | Tox: %s | DS: %s | Prep: %s | VarSel: %s | LV: %d | Vars: %d\n", 
+                        i, material, toxin, ds_label, prep_name, varsel_name, opt_nlv, length(selected_vars)))
           }
         }
       }
@@ -215,8 +229,8 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
 
 # Define the configurations for the 4 runs
 run_configs <- list(
-  list(threshold = 1000, weighted = "none",     toxin = "DON",       output = "plsda_1000_all.csv"),
-  list(threshold = 1250, weighted = "none",     toxin = "Total_DON", output = "plsda_1250_all.csv"),
+  list(threshold = 1000, weighted = "none", toxin = "DON",       output = "plsda_1000_all.csv"),
+  list(threshold = 1250, weighted = "none", toxin = "Total_DON", output = "plsda_1250_all.csv"),
   list(threshold = 1000, weighted = "triangle", toxin = "DON",       output = "weighted_plsda_1000_all.csv"),
   list(threshold = 1250, weighted = "triangle", toxin = "Total_DON", output = "weighted_plsda_1250_all.csv")
 )
@@ -235,25 +249,23 @@ for (cfg in run_configs) {
   
   message("Running Phase 1: Without Downsampling...")
   res_no_ds <- pipeline_binary_plsda_sequential(
-    nirs_data = current_nirs_data, 
-    target_toxins = cfg$toxin, 
-    use_weights = use_weights_flag,
+    nirs_data        = current_nirs_data, 
+    target_toxins    = cfg$toxin, 
+    use_weights      = use_weights_flag,
     apply_downsampling = FALSE 
   )
   
   message("Running Phase 2: With Downsampling...")
   res_with_ds <- pipeline_binary_plsda_sequential(
-    nirs_data = current_nirs_data, 
-    target_toxins = cfg$toxin, 
-    use_weights = use_weights_flag,
+    nirs_data        = current_nirs_data, 
+    target_toxins    = cfg$toxin, 
+    use_weights      = use_weights_flag,
     apply_downsampling = TRUE 
   )
   
-  # Combine both results into one beautiful dataset
   combined_results <- rbind(res_no_ds, res_with_ds)
   
-  # Save the results
-  output_path <- file.path("./results/triangle/mixed_all/R2/", cfg$output)
+  output_path <- file.path("./results/austrian/", cfg$output)
   write.csv(combined_results, output_path, row.names = FALSE)
   
   message(sprintf("Saved combined results to %s\n", output_path))
