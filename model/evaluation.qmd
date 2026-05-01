@@ -19,14 +19,14 @@ initial_data <- list(
 )
 
 # remove all column except 1 - 5 and 15
-data <- lapply(initial_data, function(df) df[, c(1:6, 10:13, 17,18)])
+data <- lapply(initial_data, function(df) df[, c(1:6, 11:14, 18,19)])
 
 # add details about the sample_weight
 data <- Map(function(df, nm) {
   df$Sample_weight <- if (grepl("weighted", nm, ignore.case = TRUE)) {
-    "TRUE"
+    "True"
   } else {
-    "FALSE"
+    "False"
   }
   df
 }, data, names(data))
@@ -44,134 +44,148 @@ data <- Map(function(df, nm) {
 # combine all dataframes into one
 combined_data <- do.call(rbind, data)
 
-# except F1_Score and MCC, transform all to factor
-combined_data[c(1:6, 13,14)] <- lapply(combined_data[c(1:6, 13,14)], as.factor)
-str(combined_data)
-
 #Add TPR and TNR
 combined_data$TPR <- combined_data$TP / (combined_data$TP + combined_data$FN)
 combined_data$TNR <- combined_data$TN / (combined_data$TN + combined_data$FP)
 
-#rename the columns
+#rename the columns and dataframe for better readability
 library(dplyr)
 lme_data <- combined_data %>%
  rename(
    Grinding = Sample_source,
    Toxin = Target_toxin,
-   Weighting = Sample_weight
- )
+   Weighting = Sample_weight,
+   Downsampling = Downsampled
+ ) %>%
+  mutate(
+    Grinding = case_when(
+      Grinding == "intact" ~ "False",
+      Grinding == "ground" ~ "True",
+      TRUE ~ as.character(Grinding)
+    ),
+    Toxin = case_when(
+      Toxin == "Total_DON" ~ "Total DON",
+      TRUE ~ as.character(Toxin)
+    ),
+    Preprocessing = case_when(
+      Preprocessing == "1st_Der" ~ "FD",
+      TRUE ~ as.character(Preprocessing)
+    ),
+    Downsampling = case_when(
+      Downsampling %in% c("TRUE", TRUE) ~ "True",
+      Downsampling %in% c("FALSE", FALSE) ~ "False",
+      TRUE ~ as.character(Downsampling)
+    )
+  )
+
+# except F1_Score, TPR, TNR and MCC, transform all to factor
+lme_data[c(1:6, 13,14)] <- lapply(lme_data[c(1:6, 13,14)], as.factor)
+str(lme_data)
 ```
 
 ## Analysis using Linear mixed-effects on F1-Score
-This experiment is performed using Full Factorial Design with 6 factors: Grinding, Toxin, Preprocessing, Variable_Selection, Downsampled, Dataset and Weighting. The model includes all main effects and interactions up to the three-way level. The random effect is Split, which accounts for the variability across different data splits.
+This experiment is performed using Full Factorial Design with 6 factors: Grinding, Toxin, Preprocessing, Variable_Selection, Downsampling, Dataset and Weighting. The model includes all main effects and interactions up to the three-way level. The random effect is Split, which accounts for the variability across different data splits.
 
 ```{r}
 # Load necessary libraries
 library(glmmTMB)
 library(car)
+library(emmeans)
 
 # The F1_Score is a proportion, so we can use a beta regression with logit link function. However, since we have random effects, we will use glmmTMB which can handle beta regression with random effects.
-model_f1 <- glmmTMB(F1_score ~ Grinding + Toxin + Preprocessing + Variable_Selection + Downsampled + Dataset + Weighting + (1|Split), data = lme_data, family = ordbeta(link = "logit"),
-control = glmmTMBControl(optCtrl = list(iter.max = 1000, eval.max = 1000)))
-Anova(model_f1, type = "II")
+model_f1 <- glmmTMB(F1_score ~ Grinding + Toxin + Preprocessing + Variable_Selection + Downsampling + Dataset + Weighting + (1|Split), data = lme_data, 
+family = ordbeta(link = "logit"), control = glmmTMBControl(optCtrl = list(iter.max = 1000, eval.max = 1000)))
+
+Anova(model_f1, type = "II") # All main effects are significant.
 summary(model_f1)
 
-# determine the ICC (intraclass correlation) of the model
-library(performance)
-icc(model_f1)
-r2(model_f1)
-
 # Get marginal means for all combinations
-pipeline_means <- emmeans(model_f1, 
+pipeline_means_f1 <- emmeans(model_f1, 
                           ~ Grinding * Toxin * Preprocessing * 
-                            Variable_Selection * Downsampled * 
+                            Variable_Selection * Downsampling * 
                             Dataset * Weighting)
 
 # Convert to dataframe and back-transform to probability scale
-pipeline_df <- as.data.frame(pipeline_means) |>
+pipeline_df_f1 <- as.data.frame(pipeline_means_f1) %>%
   mutate(
     pipeline = paste(Grinding, Toxin, Preprocessing,
-                     Variable_Selection, Downsampled,
+                     Variable_Selection, Downsampling,
                      Dataset, Weighting, sep = " | "),
     F1_est   = plogis(emmean),
     F1_lcl   = plogis(asymp.LCL),
     F1_ucl   = plogis(asymp.UCL)
-  ) |>
-  arrange(desc(F1_est))
-
-# Get indices of top 10
-top10_idx <- order(as.data.frame(pipeline_means)$emmean, 
-                   decreasing = TRUE)[1:10]
-top10_means <- pipeline_means[top10_idx]
-
-# Pairwise contrasts among top 10
-library(multcomp)
-cld_top10 <- cld(top10_means,
-                            adjust  = "sidak",
-                            Letters = letters,
-                            sort    = TRUE) %>%
-  as.data.frame() %>%
-  mutate(
-    pipeline = paste(Grinding, Toxin, Preprocessing,
-                     Variable_Selection, Downsampled,
-                     Dataset, Weighting, sep = "\n"),  # newline for plot
-    F1_est   = plogis(emmean),
-    F1_lcl   = plogis(asymp.LCL),
-    F1_ucl   = plogis(asymp.UCL),
-    .group   = trimws(.group),
-    # Flag pipelines in the top group
-    is_best  = .group == .group[which.max(F1_est)]
   ) %>%
   arrange(desc(F1_est))
 
-# ============================================================
-# STEP 4: VISUALIZATION 1 — TOP 10 WITH SIGNIFICANCE LETTERS
-# ============================================================
-library(forcats)
-p1 <- cld_top10 |>
-  ggplot(aes(x = fct_reorder(pipeline, F1_est),
-             y = F1_est,
-             color = is_best)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = F1_lcl, ymax = F1_ucl),
-                width = 0.25, linewidth = 0.8) +
-  geom_text(aes(label = .group, y = F1_ucl + 0.005),
-            vjust = -0.3, size = 4, 
-            color = "black", fontface = "bold") +
-  coord_flip() +
-  scale_color_manual(
-    values = c("TRUE" = "#1a9850", "FALSE" = "steelblue"),
-    labels = c("TRUE"  = "Best group",
-               "FALSE" = "Other"),
-    name   = ""
-  ) +
-  scale_y_continuous(
-    limits = c(
-      min(cld_top10$F1_lcl) - 0.01,
-      max(cld_top10$F1_ucl) + 0.02
-    )
-  ) +
-  labs(
-    title    = "Top 10 Pipelines by Estimated F1 Score",
-    subtitle = "Shared letters = not significantly different (Sidak adjusted)\nGreen = statistically best group",
-    x        = NULL,
-    y        = "Estimated F1 Score",
-    caption  = "Error bars = 95% CI | Results back-transformed from log-odds"
-  ) +
-  theme_bw(base_size = 11) +
-  theme(
-    plot.title    = element_text(face = "bold", size = 13),
-    plot.subtitle = element_text(color = "grey40", size = 9),
-    axis.text.y   = element_text(size = 8),
-    legend.position = "bottom"
-  )
+```
 
-print(p1)
+### Model Validation
+
+```{r}
+## Model validation
+library(DHARMa)
+sim_f1 <- simulateResiduals(model_f1, plot = TRUE)
+plot(sim_f1)
+## the KS test is notoriously hyper-sensitive. These are your exact F1 scores of 0 and 1. DHARMa frequently flags these boundary values as "outliers" because the observed data hit those exact floors and ceilings slightly more (or less) often than the simulated data expected. It is a mathematical artifact of the simulation process, not a failure of your model.
+plotResiduals(sim_f1, form = lme_data$Grinding)
+## Perfect symmetry, the levene test is not significant.
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+library(see)
+library(ggplot2)
+icc(model_f1)
+r2(model_f1) #explain 71.4% of the variance in F1 score
+check_collinearity(model_f1) # there is no collinearity issue in the model
+pp_check <- check_predictions(model_f1)
+pp <- plot(pp_check) + theme_classic()
+ggsave("./figures/PLS_DA/f1_prediction_check.svg", pp, width = 7, height = 5, dpi = 300) # prediction fit well with the observed data
 
 ```
 
-### Plotting
+### Pipeline Plotting
 
+```{r}
+source("utils/plotting.R")
+
+# Export the final visualization
+pipeline_f1 <- plot_top_pipelines(pipeline_means_f1, metric_name = "F1 Score")
+pipeline_f1
+ggsave("./figures/PLS_DA/f1_top10_pipelines.svg", pipeline_f1, width = 10, height = 6, dpi = 300)
+```
+
+### Plotting for each factor
+
+```{r}
+source("utils/plotting.R")
+effects <- c("Grinding", "Toxin", "Preprocessing", "Variable_Selection", "Downsampling", "Dataset", "Weighting")
+
+effect_plots <- list()
+effect_plots <- lapply(effects, function(effect) {
+  plot_effect(model_f1, factor = effect, title = paste("Main Effect of", effect, "on F1 Score"))
+})
+names(effect_plots) <- effects
+
+# Combining all effects into a single plot
+library(ggpubr)
+combined_effect_plot <- ggarrange(plotlist = 
+  effect_plots$Dataset, effect_plots$Downsampling, effect_plots$Grinding, effect_plots$Toxin, effect_plots$Weighting, effect_plots$Preprocessing, effect_plots$Variable_Selection, 
+  ncol = 4, nrow = 2, labels = c("A", "B", "C", "D", "E", "F", "G"))
+
+combined_effects <- annotate_figure(
+  combined_effect_plot,
+  top = text_grob(
+    "Main Effects of Pipeline Parameters on Estimated F1 Score",     
+    color = "black",
+    face = "bold",  
+    size = 14,
+    vjust = 0.5
+  )
+)
+combined_effects
+ggsave("./figures/PLS_DA/f1_main_effects.svg", combined_effects, width = 12, height = 6, dpi = 300)
+```
+
+### Plotting
 ```{r}
 library(ggpubr)
 library(viridis)
@@ -191,15 +205,78 @@ f1_plot <- density_plot(lme_data, lme_data$F1_score, color = "F1_Score", label =
   scale_fill_manual(values = c("F1_Score" = "#DBA41A")) +
   scale_y_continuous(limits = c(0, 7))
 f1_weighting_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Weighting, label = "F1 Score", title = "Effect of Weighting") + scale_y_continuous(limits = c(0, 7))
-f1_downsampled_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Downsampled, label = "F1 Score", title = "Effect of Downsampling") + scale_y_continuous(limits = c(0, 7))
+f1_downsampling_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Downsampling, label = "F1 Score", title = "Effect of Downsampling") + scale_y_continuous(limits = c(0, 7))
 f1_toxin_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Toxin, label = "F1 Score", title = "Effect of Toxin") + scale_y_continuous(limits = c(0, 7))
 f1_dataset_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Dataset, label = "F1 Score", title = "Effect of Dataset") + scale_y_continuous(limits = c(0, 7))
 f1_grinding_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Grinding, label = "F1 Score", title = "Effect of Grinding") + scale_y_continuous(limits = c(0, 7))
 f1_preprocessing_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Preprocessing, label = "F1 Score", title = "Effect of Preprocessing") + scale_y_continuous(limits = c(0, 7))
 f1_variable_selection_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Variable_Selection, label = "F1 Score", title = "Effect of Variable Selection") + scale_y_continuous(limits = c(0, 7))
-f1_plots <- ggarrange(f1_plot, f1_weighting_plot, f1_downsampled_plot, f1_toxin_plot, f1_dataset_plot, f1_grinding_plot, f1_preprocessing_plot, f1_variable_selection_plot,
+f1_plots <- ggarrange(f1_plot, f1_weighting_plot, f1_downsampling_plot, f1_toxin_plot, f1_dataset_plot, f1_grinding_plot, f1_preprocessing_plot, f1_variable_selection_plot,
           ncol = 4, nrow = 2)
 ggsave("./figures/PLS_DA/f1_density_plots.svg", f1_plots, width = 12, height = 6)
+```
+
+### FP and FN analysis for the most optimal pipeline
+
+```{r}
+# import the csv files
+# Load required libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(readxl)
+
+# 1. Load your results data (adjust the path if necessary)
+results_f1 <- list(
+  none = read.csv("./results/F1/plsda_1000_all.csv"),
+  weighted = read.csv("./results/F1/weighted_plsda_1000_all.csv"))
+
+# 2. Extract and separate the FP and FN samples into a long format
+# This splits the "Sample_A; Sample_B" strings into individual rows
+missclassified_samples <- lapply(results_f1, function(df) {
+  fp_df <- df %>%
+    select(Split, FP_Samples) %>%
+    filter(FP_Samples != "", !is.na(FP_Samples)) %>%
+    separate_rows(FP_Samples, sep = ";\\s*") %>%
+    rename(Sample_ID = FP_Samples) %>%
+    mutate(Misclassification = "False Positive (FP)")
+  
+  fn_df <- df %>%
+    select(Split, FN_Samples) %>%
+    filter(FN_Samples != "", !is.na(FN_Samples)) %>%
+    separate_rows(FN_Samples, sep = ";\\s*") %>%
+    rename(Sample_ID = FN_Samples) %>%
+    mutate(Misclassification = "False Negative (FN)")
+  
+  bind_rows(fp_df, fn_df)
+})
+
+y <- read_excel("data/nirs_intact.xlsx") %>% dplyr::select(c("Sample_ID", "Deoxynivalenol"))
+missclassified_samples <- lapply(missclassified_samples, function(df) {
+  df %>%
+    inner_join(y, by = "Sample_ID") %>%
+    mutate(
+      Uncertainty = case_when(
+        Deoxynivalenol < 700 ~ "False Positive (FP)",
+        Deoxynivalenol > 1300 ~ "False Negative (FN)",
+        Deoxynivalenol < 1000 ~ "Uncertain False Positive (UFP)",
+        TRUE ~ "Uncertain False Negative (UFN)"
+      ),
+      Uncertainty = factor(Uncertainty, levels = c("False Positive (FP)", "Uncertain False Positive (UFP)", "Uncertain False Negative (UFN)", "False Negative (FN)"))
+    )
+})
+
+sum(missclassified_samples$none$Misclassification == "False Negative (FN)")
+sum(missclassified_samples$weighted$Misclassification == "False Negative (FN)")
+
+# 4. Create a histogram plot
+source("utils/plotting.R")
+missclassified_plot <- lapply(missclassified_samples, function(df){
+  hist_plot(df)
+})
+misclassified_plot$none
+misclassified_plot$weighted
 ```
 
 ## Analysis using Linear mixed-effects on MCC
@@ -211,7 +288,8 @@ lme_data <- lme_data %>%
 str(lme_data)
 
 #Fit the linear mixed-effects model until three-way interaction
-model_mcc <- glmmTMB(MCC_scaled ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Downsampled + Dataset + Weighting)^3 + (1|Split), data = lme_data , family = ordbeta(link = "logit"), control = glmmTMBControl(optCtrl = list(iter.max = 1000, eval.max = 1000)))
+model_mcc <- glmmTMB(MCC_scaled ~ Grinding + Toxin + Preprocessing + Variable_Selection + Downsampling + Dataset + Weighting + (1|Split), data = lme_data , family = ordbeta(link = "logit"), control = glmmTMBControl(optCtrl = list(iter.max = 1000, eval.max = 1000)))
+
 Anova(model_mcc, type = "II")
 summary(model_mcc)
 
@@ -224,7 +302,7 @@ r2(model_mcc)
 pipeline_means_mcc <- emmeans(
   model_mcc,
   ~ Grinding * Toxin * Preprocessing *
-    Variable_Selection * Downsampled *
+    Variable_Selection * Downsampling *
     Dataset * Weighting
 )
 
@@ -233,7 +311,7 @@ pipeline_means_mcc <- emmeans(
 pipeline_df_mcc <- as.data.frame(pipeline_means_mcc) |>
   mutate(
     pipeline = paste(Grinding, Toxin, Preprocessing,
-                     Variable_Selection, Downsampled,
+                     Variable_Selection, Downsampling,
                      Dataset, Weighting, sep = " | "),
 
     # back-transform:
@@ -242,307 +320,78 @@ pipeline_df_mcc <- as.data.frame(pipeline_means_mcc) |>
     MCC_ucl = plogis(asymp.UCL) * 2 - 1
   ) |>
   arrange(desc(MCC_est))
-
-# Preview top 10
-cat("\n=== TOP 10 PIPELINES (MCC) ===\n")
-head(pipeline_df_mcc, 10)
-
-# ============================================================
-# STEP 6: PAIRWISE CONTRASTS AMONG TOP 10
-# ============================================================
-
-top10_idx_mcc <- order(
-  as.data.frame(pipeline_means_mcc)$emmean,
-  decreasing = TRUE
-)[1:10]
-
-top10_means_mcc <- pipeline_means_mcc[top10_idx_mcc]
-
-top10_contrasts_mcc <- contrast(
-  top10_means_mcc,
-  method = "pairwise",
-  adjust = "sidak"
-)
-summary(top10_contrasts_mcc)
-
-# ============================================================
-# STEP 7: COMPACT LETTER DISPLAY
-# ============================================================
-
-cld_top10_mcc <- multcomp::cld(
-  top10_means_mcc,
-  adjust  = "sidak",
-  Letters = letters,
-  sort    = TRUE
-) |>
-  as.data.frame() |>
-  mutate(
-    pipeline = paste(Grinding, Toxin, Preprocessing,
-                     Variable_Selection, Downsampled,
-                     Dataset, Weighting, sep = "\n"),
-    MCC_est  = plogis(emmean),
-    MCC_lcl  = plogis(asymp.LCL),
-    MCC_ucl  = plogis(asymp.UCL),
-    .group   = trimws(.group),
-    is_best  = .group == .group[which.max(MCC_est)]
-  ) |>
-  arrange(desc(MCC_est))
-
-# ============================================================
-# STEP 8: VISUALIZATION 1 — TOP 10 WITH CLD LETTERS
-# ============================================================
-
-p1_mcc <- cld_top10_mcc |>
-  ggplot(aes(x = fct_reorder(pipeline, MCC_est),
-             y = MCC_est,
-             color = is_best)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = MCC_lcl, ymax = MCC_ucl),
-                width = 0.25, linewidth = 0.8) +
-  geom_text(aes(label = .group, y = MCC_ucl + 0.005),
-            vjust = -0.3, size = 4,
-            color = "black", fontface = "bold") +
-  coord_flip() +
-  scale_color_manual(
-    values = c("TRUE" = "#1a9850", "FALSE" = "steelblue"),
-    labels = c("TRUE" = "Best group", "FALSE" = "Other"),
-    name   = ""
-  ) +
-  scale_y_continuous(
-    limits = c(
-      min(cld_top10_mcc$MCC_lcl) - 0.01,
-      max(cld_top10_mcc$MCC_ucl) + 0.03
-    )
-  ) +
-  labs(
-    title    = "Top 10 Pipelines by Estimated MCC",
-    subtitle = "Shared letters = not significantly different (Sidak adjusted)\nGreen = statistically best group",
-    x        = NULL,
-    y        = "Estimated MCC",
-    caption  = "Error bars = 95% CI | Results back-transformed from log-odds"
-  ) +
-  theme_bw(base_size = 11) +
-  theme(
-    plot.title      = element_text(face = "bold", size = 13),
-    plot.subtitle   = element_text(color = "grey40", size = 9),
-    axis.text.y     = element_text(size = 8),
-    legend.position = "bottom"
-  )
-
-print(p1_mcc)
-
-# ============================================================
-# STEP 9: VISUALIZATION 2 — CONTRAST HEATMAP
-# ============================================================
-
-contrast_df_mcc <- summary(top10_contrasts_mcc) |>
-  as.data.frame() |>
-  mutate(
-    significant = p.value < 0.05,
-    sig_label   = case_when(
-      p.value < 0.001 ~ "***",
-      p.value < 0.01  ~ "**",
-      p.value < 0.05  ~ "*",
-      TRUE            ~ "ns"
-    ),
-    pipeline1 = sub(" - .*", "", contrast),
-    pipeline2 = sub(".* - ", "", contrast)
-  )
-
-all_pipes_mcc <- unique(c(contrast_df_mcc$pipeline1,
-                           contrast_df_mcc$pipeline2))
-
-mat_df_mcc <- bind_rows(
-  contrast_df_mcc |>
-    select(pipeline1, pipeline2, p.value, sig_label),
-  contrast_df_mcc |>
-    rename(pipeline1 = pipeline2,
-           pipeline2 = pipeline1) |>
-    select(pipeline1, pipeline2, p.value, sig_label)
-) |>
-  bind_rows(
-    data.frame(pipeline1 = all_pipes_mcc,
-               pipeline2 = all_pipes_mcc,
-               p.value   = 1,
-               sig_label = "")
-  )
-
-p2_mcc <- mat_df_mcc |>
-  ggplot(aes(x = pipeline1, y = pipeline2, fill = p.value)) +
-  geom_tile(color = "white", linewidth = 0.5) +
-  geom_text(aes(label = sig_label),
-            size = 3.5, fontface = "bold") +
-  scale_fill_gradient2(
-    low      = "#d73027",
-    mid      = "#ffffbf",
-    high     = "#f7f7f7",
-    midpoint = 0.05,
-    limits   = c(0, 1),
-    name     = "p-value"
-  ) +
-  labs(
-    title    = "Pairwise Comparison Heatmap — Top 10 Pipelines (MCC)",
-    subtitle = "Red = significant difference | *** p<0.001 | ** p<0.01 | * p<0.05 | ns",
-    x        = NULL,
-    y        = NULL
-  ) +
-  theme_bw(base_size = 9) +
-  theme(
-    axis.text.x     = element_text(angle = 45, hjust = 1, size = 7),
-    axis.text.y     = element_text(size = 7),
-    plot.title      = element_text(face = "bold"),
-    plot.subtitle   = element_text(color = "grey40", size = 8),
-    legend.position = "right"
-  )
-
-print(p2_mcc)
 ```
 
+### Model Validation
+
 ```{r}
-# Load your libraries
-library(ggplot2)
-library(ggpubr) # For the comparison stars
+## Model validation
+library(DHARMa)
+sim_mcc <- simulateResiduals(model_mcc, plot = TRUE)
+plot(sim_mcc)
+## the KS test is notoriously hyper-sensitive. These are your exact MCC scores of 0 and 1. DHARMa frequently flags these boundary values as "outliers" because the observed data hit those exact floors and ceilings slightly more (or less) often than the simulated data expected. It is a mathematical artifact of the simulation process, not a failure of your model.
+plotResiduals(sim_mcc, form = lme_data$Grinding)
+## Perfect symmetry, the levene test is not significant.
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+library(see)
+icc(model_mcc)
+r2(model_mcc) #explain 73.7% of the variance in MCC score
+check_collinearity(model_mcc) # there is no collinearity issue in the model
+pp_check_mcc <- check_predictions(model_mcc)
+pp_mcc <- plot(pp_check_mcc) + theme_classic() # prediction fit well with the observed data
+ggsave("./figures/PLS_DA/mcc_prediction_check.svg", pp_mcc, width = 7, height = 5, dpi = 300)
+```
 
-# 1. Main Effect Plot
-# Load your libraries
-library(ggplot2)
-library(ggpubr)
+### Pipeline Plotting
+```{r}
+my_mcc_plot <- plot_top_pipelines(
+  pipeline_emmeans = pipeline_means_mcc,
+  metric_name      = "Estimated MCC Score",
+  backtransform_fn = function(x) plogis(x) * 2 - 1
+)
+ggsave("./figures/PLS_DA/mcc_top10_pipelines.svg", my_mcc_plot, width = 10, height = 6, dpi = 300)
+```
 
-# Create the beautiful Violin + Boxplot combo
-ggplot(lme_data, aes(x = Grinding, y = MCC, fill = Grinding)) +
-  # The violin layer (trim = FALSE keeps the beautiful natural tails)
-  geom_violin(alpha = 0.7, trim = FALSE, color = NA) +
-  # The tiny inner boxplot (width = 0.1 keeps it slim)
-  geom_boxplot(width = 0.1, fill = "white", color = "black", outlier.shape = NA) +
-  # Your custom colors
-  scale_fill_manual(values = c("FALSE" = "#fca311", "TRUE" = "#14213d")) +
-  theme_minimal() +
-  labs(
-    title = "Distribution of MCC by Weighting",
-    subtitle = "Violin shapes show the full density of your 12,800 data points",
-    x = "Was Weighting Applied?",
-    y = "MCC Score"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    legend.position = "none" # Hide the legend for a cleaner look
-  ) +
-  # Adding those helpful significance stars back in!
-  stat_compare_means(
-    comparisons = list(c("FALSE", "TRUE")), 
-    label = "p.signif", 
-    method = "t.test"
+### Plotting for each factor
+
+```{r}
+effects <- c("Grinding", "Toxin", "Preprocessing", "Variable_Selection", "Downsampling", "Dataset", "Weighting")
+effect_plots_mcc <- lapply(effects, function(effect) {
+  plot_effect(model_mcc, factor = effect, title = paste("Main Effect of", effect, "on MCC Score"), y = "Estimated MCC Score", backtransform_fn = function(x) plogis(x) * 2 - 1)
+})
+names(effect_plots_mcc) <- effects
+
+# Combining all effects into a single plot
+combined_effect_mcc_plot <- ggarrange(plotlist = 
+  effect_plots_mcc$Dataset, effect_plots_mcc$Downsampling, effect_plots_mcc$Grinding, effect_plots_mcc$Toxin, effect_plots_mcc$Weighting, effect_plots_mcc$Preprocessing, effect_plots_mcc$Variable_Selection, 
+  ncol = 4, nrow = 2, labels = c("A", "B", "C", "D", "E", "F", "G"))
+
+combined_effects_mcc <- annotate_figure(
+  combined_effect_mcc_plot,
+  top = text_grob(
+    "Main Effects of Pipeline Parameters on Estimated MCC Score",     
+    color = "black",
+    face = "bold",  
+    size = 14,
+    vjust = 0.5
   )
+)
+combined_effects_mcc
+ggsave("./figures/PLS_DA/mcc_main_effects.svg", combined_effects_mcc, width = 12, height = 6, dpi = 300)
 
-# 2. Interaction Plot (Swapping X and Fill for cleaner brackets)
-ggplot(lme_data, aes(x = Toxin, y = MCC, fill = Weighting)) +
-  # Dodged violins to sit them next to each other
-  geom_violin(position = position_dodge(width = 0.8), alpha = 0.7, trim = FALSE, color = NA) +
-  # Dodged inner boxplots
-  geom_boxplot(position = position_dodge(width = 0.8), width = 0.1, fill = "white", color = "black", outlier.shape = NA) +
-  scale_fill_manual(values = c("FALSE" = "#fca311", "TRUE" = "#14213d")) +
-  theme_minimal() +
-  labs(
-    title = "Density of MCC Scores by Toxin and Weighting",
-    x = "Toxin Type",
-    y = "MCC Score",
-    fill = "Weighting Applied?"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    legend.position = "bottom"
-  ) +
-  # Adding the stars for the groups
-  stat_compare_means(
-    aes(group = Weighting), 
-    label = "p.signif", 
-    method = "t.test"
-  )
+```
 
-str(mcc_pipelines_df)
+### Plotting
+```{r}
 
-library(ggplot2)
-
-library(emmeans)
-library(ggplot2)
-
-# 1. Calculate the marginal mean for JUST Weighting
-emm_weighting <- emmeans(model_f1, ~ Toxin, pbkrtest.limit = 12800)
-emm_weighting_df <- as.data.frame(emm_weighting)
-str(emm_weighting_df)
-# 2. Plot the isolated effect
-ggplot(emm_weighting_df, aes(x = Toxin, y = emmean, color = Toxin)) +
-  # Draw the error bar
-  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.1, size = 1) +
-  # Draw the point estimate
-  geom_point(size = 4) +
-  scale_color_manual(values = c("FALSE" = "#fca311", "TRUE" = "#14213d")) +
-  theme_minimal() +
-  labs(
-    title = "Main Effect of Weighting",
-    subtitle = "Model-adjusted marginal means (with 95% CIs)",
-    x = "Was Weighting Applied?",
-    y = "Estimated MCC"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    legend.position = "none"
-  )
-
-
-
-library(ggplot2)
-library(dplyr)
-
-# 1. Sort the dataframe from best to worst F1 Score
-f1_ranked <- f1_pipelines_df %>%
-  arrange(desc(emmean)) %>%
-  mutate(Rank = row_number()) # Assign a rank from 1 to 128
-
-# 2. Extract the lower confidence limit of the absolute BEST model (Rank 1)
-threshold <- f1_ranked$lower.CL[1]
-
-# 3. Categorize the models based on the Golden Rule
-f1_ranked <- f1_ranked %>%
-  mutate(
-    Status = case_when(
-      Rank == 1 ~ "The Best Model",
-      upper.CL < threshold ~ "Significantly Worse than Best",
-      TRUE ~ "Statistically Indistinguishable from Best"
-    )
-  )
-
-# 4. Plot the ranked pipelines
-ggplot(f1_ranked, aes(x = Rank, y = emmean, color = Status)) +
-  # Add the error bars first so the points sit on top
-  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0, alpha = 0.5) +
-  # Add the points
-  geom_point(size = 2) +
-  # Draw a horizontal dashed line at the threshold
-  geom_hline(yintercept = threshold, linetype = "dashed", color = "darkred", size = 1) +
-  # Custom colors for clarity
-  scale_color_manual(values = c("The Best Model" = "#14213d", 
-                                "Statistically Indistinguishable from Best" = "#fca311", 
-                                "Significantly Worse than Best" = "gray70")) +
-  theme_minimal() +
-  labs(
-    title = "Ranking All 128 Pipelines by F1 Score",
-    subtitle = "Models below the dashed red line are significantly worse than the top model",
-    x = "Pipeline Rank (1 = Best, 128 = Worst)",
-    y = "Estimated F1 Score",
-    color = "Model Status"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", size = 14),
-    legend.position = "bottom"
-  )
 ```
 
 ## Analysis using Linear mixed-effects on TPR and TNR
  
  ```{r}
  # Data analysis for TPR
-model_tpr <- glmmTMB(TPR ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Downsampled + Dataset + Weighting)^3 + (1|Split), data = lme_data, family = ordbeta(link = "logit"),
+model_tpr <- glmmTMB(TPR ~ Grinding + Toxin + Preprocessing + Variable_Selection + Downsampling + Dataset + Weighting + (1|Split), data = lme_data, family = ordbeta(link = "logit"),
 control = glmmTMBControl(optCtrl = list(iter.max = 1000, eval.max = 1000)))
 Anova(model_tpr, type = "II")
 summary(model_tpr)
@@ -552,144 +401,69 @@ library(performance)
 icc(model_tpr)
 r2(model_tpr)
 
+```
+
+### Model validation for TPR
+
+```{r}
+## Model validation
+library(DHARMa)
+sim_tpr <- simulateResiduals(model_tpr, plot = TRUE)
+plot(sim_tpr)
+## the KS test is notoriously hyper-sensitive. These are your exact TPR scores of 0 and 1. DHARMa frequently flags these boundary values as "outliers" because the observed data hit those exact floors and ceilings slightly more (or less) often than the simulated data expected. It is a mathematical artifact of the simulation process, not a failure of your model.
+plotResiduals(sim_tpr, form = lme_data$Grinding)
+## Perfect symmetry, the levene test is not significant.
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+library(see)
+icc(model_tpr)
+r2(model_tpr) #explain 91.1% of the variance in TPR score
+check_collinearity(model_tpr) # there is no collinearity issue in the model
+pp_check_tpr <- check_predictions(model_tpr)
+plot(pp_check_tpr) # prediction fit well with the observed data
+```
+
+### Pipeline plotting for TPR
+
+```{r}
 # Get marginal means for all combinations
-pipeline_means <- emmeans(model_tpr, 
+pipeline_means_tpr <- emmeans(model_tpr, 
                           ~ Grinding * Toxin * Preprocessing * 
-                            Variable_Selection * Downsampled * 
+                            Variable_Selection * Downsampling * 
                             Dataset * Weighting)
 
-# Convert to dataframe and back-transform to probability scale
-pipeline_df <- as.data.frame(pipeline_means) |>
-  mutate(
-    pipeline = paste(Grinding, Toxin, Preprocessing,
-                     Variable_Selection, Downsampled,
-                     Dataset, Weighting, sep = " | "),
-    tpr_est   = plogis(emmean),
-    tpr_lcl   = plogis(asymp.LCL),
-    tpr_ucl   = plogis(asymp.UCL)
-  ) |>
-  arrange(desc(tpr_est))
-
-# Get indices of top 10
-top10_idx_tpr <- order(as.data.frame(pipeline_means)$emmean, 
-                   decreasing = TRUE)[1:10]
-top10_means_tpr <- pipeline_means[top10_idx_tpr]
-
-# Pairwise contrasts among top 10
-top10_contrasts_tpr <- contrast(top10_means_tpr,
-                            method = "pairwise",
-                            adjust = "sidak")
-summary(top10_contrasts_tpr)
-library(multcomp)
-cld_top10 <- multcomp::cld(top10_means_tpr,
-                            adjust  = "sidak",
-                            Letters = letters,
-                            sort    = TRUE) |>
-  as.data.frame() |>
-  mutate(
-    pipeline = paste(Grinding, Toxin, Preprocessing,
-                     Variable_Selection, Downsampled,
-                     Dataset, Weighting, sep = "\n"),  # newline for plot
-    tpr_est   = plogis(emmean),
-    tpr_lcl   = plogis(asymp.LCL),
-    tpr_ucl   = plogis(asymp.UCL),
-    .group   = trimws(.group),
-    # Flag pipelines in the top group
-    is_best  = .group == .group[which.max(tpr_est)]
-  ) |>
-  arrange(desc(tpr_est))
-
-# ============================================================
-# STEP 4: VISUALIZATION 1 — TOP 10 WITH SIGNIFICANCE LETTERS
-# ============================================================
-library(forcats)
-p1 <- cld_top10 |>
-  ggplot(aes(x = fct_reorder(pipeline, tpr_est),
-             y = tpr_est,
-             color = is_best)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = tpr_lcl, ymax = tpr_ucl),
-                width = 0.25, linewidth = 0.8) +
-  geom_text(aes(label = .group, y = tpr_ucl + 0.005),
-            vjust = -0.3, size = 4, 
-            color = "black", fontface = "bold") +
-  coord_flip() +
-  scale_color_manual(
-    values = c("TRUE" = "#1a9850", "FALSE" = "steelblue"),
-    labels = c("TRUE"  = "Best group",
-               "FALSE" = "Other"),
-    name   = ""
-  ) +
-  scale_y_continuous(
-    limits = c(
-      min(cld_top10$tpr_lcl) - 0.01,
-      max(cld_top10$tpr_ucl) + 0.02
-    )
-  ) +
-  labs(
-    title    = "Top 10 Pipelines by Estimated TPR",
-    subtitle = "Shared letters = not significantly different (Sidak adjusted)\nGreen = statistically best group",
-    x        = NULL,
-    y        = "Estimated TPR",
-    caption  = "Error bars = 95% CI | Results back-transformed from log-odds"
-  ) +
-  theme_bw(base_size = 11) +
-  theme(
-    plot.title    = element_text(face = "bold", size = 13),
-    plot.subtitle = element_text(color = "grey40", size = 9),
-    axis.text.y   = element_text(size = 8),
-    legend.position = "bottom"
-  )
-
-print(p1)
-
-
-# Data analysis for TNR
-model_tnr <- lmer(TNR ~ (Grinding + Toxin + Preprocessing + Variable_Selection + Downsampled + Dataset + Weighting)^3 + (1|Split), data = lme_data)
-anova(model_tnr)
-summary(model_tnr)
-
-# select the best pipelines
-best_pipelines_tnr <- emmeans(model_tnr, pairwise ~ Grinding * Toxin * Preprocessing * Variable_Selection * Downsampled * Dataset * Weighting, pbkrtest.limit = 12800)
-tnr_pipelines_df <- as.data.frame(best_pipelines_tnr$emmeans)
-tnr_pipelines_df <- tnr_pipelines_df[order(-tnr_pipelines_df$emmean), ]
+# plot the top 10 pipelines
+pipeline_tpr <- plot_top_pipelines(pipeline_means_tpr, metric_name = "TPR")
+ggsave("./figures/PLS_DA/tpr_top10_pipelines.svg", pipeline_tpr, width = 10, height = 6, dpi = 300)
 ```
 
 ### Plotting for TPR and TNR
-
 ```{r}
 # Plot TPR
 tp_plot <- density_plot(lme_data, lme_data$TPR, color = "TPR", label = "True Positive Rate", title = "TPR of all pipelines") + scale_fill_manual(values = c("TPR" = "#DB1A1A"))
 tp_dataset_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Dataset, label = "True Positive Rate", title = "Effect of Dataset")
-tp_downsampled_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Downsampled, label = "True Positive Rate", title = "Effect of Downsampling")
+tp_downsampling_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Downsampling, label = "True Positive Rate", title = "Effect of Downsampling")
 tp_weighting_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Weighting, label = "True Positive Rate", title = "Effect of Weighting")
 tp_toxin_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Toxin, label = "True Positive Rate", title = "Effect of Toxin")
 tp_grinding_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Grinding, label = "True Positive Rate", title = "Effect of Grinding")
 tp_preprocessing_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Preprocessing, label = "True Positive Rate", title = "Effect of Preprocessing")
 tp_variable_selection_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Variable_Selection, label = "True Positive Rate", title = "Effect of Variable Selection")
 
-tpr_plots <- ggarrange(tp_plot, tp_weighting_plot, tp_downsampled_plot, tp_toxin_plot, tp_dataset_plot, tp_grinding_plot, tp_preprocessing_plot, tp_variable_selection_plot,
+tpr_plots <- ggarrange(tp_plot, tp_weighting_plot, tp_downsampling_plot, tp_toxin_plot, tp_dataset_plot, tp_grinding_plot, tp_preprocessing_plot, tp_variable_selection_plot,
           ncol = 4, nrow = 2)
 ggsave("./figures/PLS_DA/tpr_density_plots.svg", tpr_plots, width = 12, height = 6)
 
 # Plot TNR
 tn_plot <- density_plot(lme_data, lme_data$TNR, color = "TNR", label = "True Negative Rate", title = "TNR of all pipelines") + scale_fill_manual(values = c("TNR" = "#2FA4D7"))
 tn_dataset_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Dataset, label = "True Negative Rate", title = "Effect of Dataset") 
-tn_downsampled_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Downsampled, label = "True Negative Rate", title = "Effect of Downsampling") + scale_y_continuous(limits = c(0, 7))
+tn_downsampling_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Downsampling, label = "True Negative Rate", title = "Effect of Downsampling") + scale_y_continuous(limits = c(0, 7))
 tn_weighting_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Weighting, label = "True Negative Rate", title = "Effect of Weighting")
 tn_toxin_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Toxin, label = "True Negative Rate", title = "Effect of Toxin")
 tn_grinding_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Grinding, label = "True Negative Rate", title = "Effect of Grinding")
 tn_preprocessing_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Preprocessing, label = "True Negative Rate", title = "Effect of Preprocessing")
 tn_variable_selection_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Variable_Selection, label = "True Negative Rate", title = "Effect of Variable Selection")
-tnr_plots <- ggarrange(tn_plot, tn_weighting_plot, tn_downsampled_plot, tn_toxin_plot, tn_dataset_plot, tn_grinding_plot, tn_preprocessing_plot, tn_variable_selection_plot,
+tnr_plots <- ggarrange(tn_plot, tn_weighting_plot, tn_downsampling_plot, tn_toxin_plot, tn_dataset_plot, tn_grinding_plot, tn_preprocessing_plot, tn_variable_selection_plot,
           ncol = 4, nrow = 2)
 ggsave("./figures/PLS_DA/tnr_density_plots.svg", tnr_plots, width = 12, height = 6)
 
-# Arrange the plots in a grid
-tp_tn <- ggarrange(tp_plot, tn_plot, ncol = 2, nrow = 1)
-ggsave("./Austrian/figures/downsampling_tpr_tnr_density_plots_overall.svg", tp_tn, width = 12, height = 6)
-tpr_tnr <- ggarrange(tp_weighting_plot, tp_toxin_plot, tp_grinding_plot, tp_preprocessing_plot, tp_variable_selection_plot,
-          tn_weighting_plot, tn_toxin_plot, tn_grinding_plot, tn_preprocessing_plot, tn_variable_selection_plot,
-          ncol = 5, nrow = 2)
-ggsave("./Austrian/figures/downsampling_tpr_tnr_density_plots.svg", tpr_tnr, width = 20, height = 8)
 ```
