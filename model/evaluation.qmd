@@ -93,7 +93,7 @@ library(car)
 library(emmeans)
 
 # The F1_Score is a proportion, so we can use a beta regression with logit link function. However, since we have random effects, we will use glmmTMB which can handle beta regression with random effects.
-model_f1 <- glmmTMB(F1_score ~ Grinding + Toxin + Preprocessing + Variable_Selection + Downsampling + Dataset + Weighting + (1|Split), data = lme_data, 
+model_f1 <- glmmTMB(F1_score ~ Dataset + Downsampling + Grinding + Toxin + Weighting + Preprocessing + Variable_Selection + (1|Split), data = lme_data, 
 family = ordbeta(link = "logit"), control = glmmTMBControl(optCtrl = list(iter.max = 1000, eval.max = 1000)))
 
 Anova(model_f1, type = "II") # All main effects are significant.
@@ -168,9 +168,8 @@ names(effect_plots) <- effects
 # Combining all effects into a single plot
 library(ggpubr)
 combined_effect_plot <- ggarrange(plotlist = 
-  effect_plots$Dataset, effect_plots$Downsampling, effect_plots$Grinding, effect_plots$Toxin, effect_plots$Weighting, effect_plots$Preprocessing, effect_plots$Variable_Selection, 
+  effect_plots$Dataset$plot, effect_plots$Downsampling$plot, effect_plots$Grinding$plot, effect_plots$Toxin$plot, effect_plots$Weighting$plot, effect_plots$Preprocessing$plot, effect_plots$Variable_Selection$plot, 
   ncol = 4, nrow = 2, labels = c("A", "B", "C", "D", "E", "F", "G"))
-
 combined_effects <- annotate_figure(
   combined_effect_plot,
   top = text_grob(
@@ -421,6 +420,34 @@ r2(model_tpr) #explain 91.1% of the variance in TPR score
 check_collinearity(model_tpr) # there is no collinearity issue in the model
 pp_check_tpr <- check_predictions(model_tpr)
 plot(pp_check_tpr) # prediction fit well with the observed data
+```
+
+### Plotting for each factor for TPR
+
+```{r}
+effects <- c("Grinding", "Toxin", "Preprocessing", "Variable_Selection", "Downsampling", "Dataset", "Weighting")
+effect_plots_tpr <- lapply(effects, function(effect) {
+  plot_effect(model_tpr, factor = effect, title = paste("Main Effect of", effect, "on TPR Score"), y = "Estimated TPR Score")
+})
+names(effect_plots_tpr) <- effects
+
+# Combining all effects into a single plot
+combined_effect_tpr_plot <- ggarrange(plotlist = 
+  effect_plots_tpr$Dataset$plot, effect_plots_tpr$Downsampling$plot, effect_plots_tpr$Grinding$plot, effect_plots_tpr$Toxin$plot, effect_plots_tpr$Weighting$plot, effect_plots_tpr$Preprocessing$plot, effect_plots_tpr$Variable_Selection$plot, 
+  ncol = 4, nrow = 2, labels = c("A", "B", "C", "D", "E", "F", "G"))
+
+combined_effects_tpr <- annotate_figure(
+  combined_effect_tpr_plot,
+  top = text_grob(
+    "Main Effects of Pipeline Parameters on Estimated TPR Score",     
+    color = "black",
+    face = "bold",  
+    size = 14,
+    vjust = 0.5
+  )
+)
+combined_effects_tpr
+ggsave("./figures/PLS_DA/tpr_main_effects.svg", combined_effects_tpr, width = 12, height = 6, dpi = 300)
 ```
 
 ### Pipeline plotting for TPR

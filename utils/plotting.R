@@ -287,7 +287,7 @@ plot_effect <- function(model, factor, title, y = "Estimated F1 Score",
     )
   
   output <- ggplot(emms_df, aes(x = Factor, y = Estimate, color = Factor)) +
-            geom_errorbar(aes(ymin = LCL, ymax = UCL), width = 0.1, size = 1) +
+            geom_errorbar(aes(ymin = LCL, ymax = UCL), width = 0.1, linewidth = 1) +
             geom_point(size = 4) +
             scale_color_viridis_d() +
             theme_classic() +
@@ -296,7 +296,7 @@ plot_effect <- function(model, factor, title, y = "Estimated F1 Score",
               plot.title = element_blank(),
               legend.position = "none"
             )
-  return(output)
+  return(list(plot = output, data = emms_df))
 }
 
 hist_plot <- function(data){

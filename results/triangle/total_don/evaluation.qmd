@@ -1,0 +1,390 @@
+---
+title: "Untitled"
+format: html
+---
+
+# PLS-DA Evaluation
+## Set up the data for analysis
+```{r}
+## Import all results
+initial_data <- list(
+    "all_binary_don" = read.csv("results/triangle/mixed_all/plsda_1000_all.csv"),
+    "all_binary_total_don" = read.csv("results/triangle/total_don/mixed_all/plsda_total_don_all.csv"),
+    "all_weighted_don" = read.csv("results/triangle/mixed_all/weighted_plsda_1000_all.csv"),
+    "all_weighted_total_don" = read.csv("results/triangle/total_don/mixed_all/weighted_plsda_total_don_all.csv"),
+    "austrian_binary_don" = read.csv("results/triangle/austrian/plsda_1000_all.csv"),
+    "austrian_binary_total_don" = read.csv("results/triangle/total_don/austrian/plsda_total_don_all.csv"),
+    "austrian_weighted_don" = read.csv("results/triangle/austrian/weighted_plsda_1000_all.csv"),
+    "austrian_weighted_total_don" = read.csv("results/triangle/total_don/austrian/weighted_plsda_total_don_all.csv")
+)
+
+# remove all column except 1 - 5 and 15
+data <- lapply(initial_data, function(df) df[, c(1:6, 11:14, 18,19)])
+
+# add details about the sample_weight
+data <- Map(function(df, nm) {
+  df$Sample_weight <- if (grepl("weighted", nm, ignore.case = TRUE)) {
+    "True"
+  } else {
+    "False"
+  }
+  df
+}, data, names(data))
+
+## add details about the dataset
+data <- Map(function(df, nm) {
+  df$Dataset <- if (grepl("austrian", nm, ignore.case = TRUE)) {
+    "Austrian"
+  } else {
+    "All"
+  }
+  df
+}, data, names(data))
+
+# combine all dataframes into one
+combined_data <- do.call(rbind, data)
+
+#Add TPR and TNR
+combined_data$TPR <- combined_data$TP / (combined_data$TP + combined_data$FN)
+combined_data$TNR <- combined_data$TN / (combined_data$TN + combined_data$FP)
+
+#rename the columns and dataframe for better readability
+library(dplyr)
+lme_data <- combined_data %>%
+ rename(
+   Grinding = Sample_source,
+   Toxin = Target_toxin,
+   Weighting = Sample_weight,
+   Downsampling = Downsampled
+ ) %>%
+  mutate(
+    Grinding = case_when(
+      Grinding == "intact" ~ "False",
+      Grinding == "ground" ~ "True",
+      TRUE ~ as.character(Grinding)
+    ),
+    Toxin = case_when(
+      Toxin == "Total_DON" ~ "Total DON",
+      TRUE ~ as.character(Toxin)
+    ),
+    Preprocessing = case_when(
+      Preprocessing == "1st_Der" ~ "FD",
+      TRUE ~ as.character(Preprocessing)
+    ),
+    Downsampling = case_when(
+      Downsampling %in% c("TRUE", TRUE) ~ "True",
+      Downsampling %in% c("FALSE", FALSE) ~ "False",
+      TRUE ~ as.character(Downsampling)
+    )
+  )
+
+# except F1_Score, TPR, TNR and MCC, transform all to factor
+lme_data[c(1:6, 13,14)] <- lapply(lme_data[c(1:6, 13,14)], as.factor)
+str(lme_data)
+```
+
+## Analysis using Linear mixed-effects on F1-Score
+This experiment is performed using Full Factorial Design with 6 factors: Grinding, Toxin, Preprocessing, Variable_Selection, Downsampling, Dataset and Weighting. The model includes all main effects and interactions up to the three-way level. The random effect is Split, which accounts for the variability across different data splits.
+
+```{r}
+# Load necessary libraries
+library(glmmTMB)
+library(car)
+library(emmeans)
+
+# The F1_Score is a proportion, so we can use a beta regression with logit link function. However, since we have random effects, we will use glmmTMB which can handle beta regression with random effects.
+model_f1 <- glmmTMB(F1_score ~ Dataset + Downsampling + Grinding + Toxin + Weighting + Preprocessing + Variable_Selection + (1|Split), data = lme_data, 
+family = ordbeta(link = "logit"), control = glmmTMBControl(optCtrl = list(iter.max = 1000, eval.max = 1000)))
+
+Anova(model_f1, type = "II") # All main effects are significant.
+summary(model_f1)
+
+# Get marginal means for all combinations
+pipeline_means_f1 <- emmeans(model_f1, 
+                          ~ Grinding * Toxin * Preprocessing * 
+                            Variable_Selection * Downsampling * 
+                            Dataset * Weighting)
+
+# Convert to dataframe and back-transform to probability scale
+pipeline_df_f1 <- as.data.frame(pipeline_means_f1) %>%
+  mutate(
+    pipeline = paste(Grinding, Toxin, Preprocessing,
+                     Variable_Selection, Downsampling,
+                     Dataset, Weighting, sep = " | "),
+    F1_est   = plogis(emmean),
+    F1_lcl   = plogis(asymp.LCL),
+    F1_ucl   = plogis(asymp.UCL)
+  ) %>%
+  arrange(desc(F1_est))
+
+```
+
+### Model Validation
+
+```{r}
+## Model validation
+library(DHARMa)
+sim_f1 <- simulateResiduals(model_f1, plot = TRUE)
+plot(sim_f1)
+## the KS test is notoriously hyper-sensitive. These are your exact F1 scores of 0 and 1. DHARMa frequently flags these boundary values as "outliers" because the observed data hit those exact floors and ceilings slightly more (or less) often than the simulated data expected. It is a mathematical artifact of the simulation process, not a failure of your model.
+plotResiduals(sim_f1, form = lme_data$Grinding)
+## Perfect symmetry, the levene test is not significant.
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+library(see)
+library(ggplot2)
+icc(model_f1)
+r2(model_f1) #explain 71.4% of the variance in F1 score
+check_collinearity(model_f1) # there is no collinearity issue in the model
+pp_check <- check_predictions(model_f1)
+pp <- plot(pp_check) + theme_classic()
+pp
+ggsave("./figures/PLS_DA/total_don/f1_prediction_check.svg", pp, width = 7, height = 5, dpi = 300) # prediction fit well with the observed data
+
+```
+
+### Pipeline Plotting
+
+```{r}
+source("utils/plotting.R")
+
+# Export the final visualization
+pipeline_f1 <- plot_top_pipelines(pipeline_means_f1, metric_name = "F1 Score")
+pipeline_f1
+ggsave("./figures/PLS_DA/total_don/f1_top10_pipelines.svg", pipeline_f1, width = 10, height = 6, dpi = 300)
+```
+
+### Plotting for each factor
+
+```{r}
+source("utils/plotting.R")
+effects <- c("Grinding", "Toxin", "Preprocessing", "Variable_Selection", "Downsampling", "Dataset", "Weighting")
+
+effect_plots <- list()
+effect_plots <- lapply(effects, function(effect) {
+  plot_effect(model_f1, factor = effect, title = paste("Main Effect of", effect, "on F1 Score"))
+})
+names(effect_plots) <- effects
+
+# Combining all effects into a single plot
+library(ggpubr)
+combined_effect_plot <- ggarrange(plotlist = 
+  effect_plots$Dataset$plot, effect_plots$Downsampling$plot, effect_plots$Grinding$plot, effect_plots$Toxin$plot, effect_plots$Weighting$plot, effect_plots$Preprocessing$plot, effect_plots$Variable_Selection$plot, 
+  ncol = 4, nrow = 2, labels = c("A", "B", "C", "D", "E", "F", "G"))
+combined_effects <- annotate_figure(
+  combined_effect_plot,
+  top = text_grob(
+    "Main Effects of Pipeline Parameters on Estimated F1 Score",     
+    color = "black",
+    face = "bold",  
+    size = 14,
+    vjust = 0.5
+  )
+)
+combined_effects
+ggsave("./figures/PLS_DA/total_don/f1_main_effects.svg", combined_effects, width = 12, height = 6, dpi = 300)
+```
+
+### Plotting
+```{r}
+library(ggpubr)
+library(viridis)
+density_plot <- function(data, var, color, label, title){
+  plot <- ggplot(data, aes(x = var, fill = color)) +
+    geom_density(alpha = 0.5) +
+    theme_classic() +
+    scale_y_continuous(limits = c(0, 5)) +
+    labs(title = title, x = label, fill = color) +
+    scale_fill_viridis(discrete = TRUE) +
+    theme(legend.position = "top",
+    legend.title = element_blank())
+  return(plot)
+}
+
+f1_plot <- density_plot(lme_data, lme_data$F1_score, color = "F1_Score", label = "F1 Score", title = "F1 Score of all pipelines") + 
+  scale_fill_manual(values = c("F1_Score" = "#DBA41A")) +
+  scale_y_continuous(limits = c(0, 7))
+f1_weighting_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Weighting, label = "F1 Score", title = "Effect of Weighting") + scale_y_continuous(limits = c(0, 7))
+f1_downsampling_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Downsampling, label = "F1 Score", title = "Effect of Downsampling") + scale_y_continuous(limits = c(0, 7))
+f1_toxin_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Toxin, label = "F1 Score", title = "Effect of Toxin") + scale_y_continuous(limits = c(0, 7))
+f1_dataset_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Dataset, label = "F1 Score", title = "Effect of Dataset") + scale_y_continuous(limits = c(0, 7))
+f1_grinding_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Grinding, label = "F1 Score", title = "Effect of Grinding") + scale_y_continuous(limits = c(0, 7))
+f1_preprocessing_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Preprocessing, label = "F1 Score", title = "Effect of Preprocessing") + scale_y_continuous(limits = c(0, 7))
+f1_variable_selection_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Variable_Selection, label = "F1 Score", title = "Effect of Variable Selection") + scale_y_continuous(limits = c(0, 7))
+f1_plots <- ggarrange(f1_plot, f1_weighting_plot, f1_downsampling_plot, f1_toxin_plot, f1_dataset_plot, f1_grinding_plot, f1_preprocessing_plot, f1_variable_selection_plot,
+          ncol = 4, nrow = 2)
+ggsave("./figures/PLS_DA/total_don/f1_density_plots.svg", f1_plots, width = 12, height = 6)
+```
+
+### FP and FN analysis for the most optimal pipeline
+
+```{r}
+# import the csv files
+# Load required libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(readxl)
+
+# 1. Load your results data (adjust the path if necessary)
+results_f1 <- list(
+  none = read.csv("./results/F1/plsda_1000_all.csv"),
+  weighted = read.csv("./results/F1/weighted_plsda_1000_all.csv"))
+
+# 2. Extract and separate the FP and FN samples into a long format
+# This splits the "Sample_A; Sample_B" strings into individual rows
+missclassified_samples <- lapply(results_f1, function(df) {
+  fp_df <- df %>%
+    select(Split, FP_Samples) %>%
+    filter(FP_Samples != "", !is.na(FP_Samples)) %>%
+    separate_rows(FP_Samples, sep = ";\\s*") %>%
+    rename(Sample_ID = FP_Samples) %>%
+    mutate(Misclassification = "False Positive (FP)")
+  
+  fn_df <- df %>%
+    select(Split, FN_Samples) %>%
+    filter(FN_Samples != "", !is.na(FN_Samples)) %>%
+    separate_rows(FN_Samples, sep = ";\\s*") %>%
+    rename(Sample_ID = FN_Samples) %>%
+    mutate(Misclassification = "False Negative (FN)")
+  
+  bind_rows(fp_df, fn_df)
+})
+
+y <- read_excel("data/nirs_intact.xlsx") %>% dplyr::select(c("Sample_ID", "Deoxynivalenol"))
+missclassified_samples <- lapply(missclassified_samples, function(df) {
+  df %>%
+    inner_join(y, by = "Sample_ID") %>%
+    mutate(
+      Uncertainty = case_when(
+        Deoxynivalenol < 700 ~ "False Positive (FP)",
+        Deoxynivalenol > 1300 ~ "False Negative (FN)",
+        Deoxynivalenol < 1000 ~ "Uncertain False Positive (UFP)",
+        TRUE ~ "Uncertain False Negative (UFN)"
+      ),
+      Uncertainty = factor(Uncertainty, levels = c("False Positive (FP)", "Uncertain False Positive (UFP)", "Uncertain False Negative (UFN)", "False Negative (FN)"))
+    )
+})
+
+sum(missclassified_samples$none$Misclassification == "False Negative (FN)")
+sum(missclassified_samples$weighted$Misclassification == "False Negative (FN)")
+
+# 4. Create a histogram plot
+source("utils/plotting.R")
+missclassified_plot <- lapply(missclassified_samples, function(df){
+  hist_plot(df)
+})
+misclassified_plot$none
+misclassified_plot$weighted
+```
+
+
+## Analysis using Linear mixed-effects on TPR and TNR
+ 
+ ```{r}
+ # Data analysis for TPR
+model_tpr <- glmmTMB(TPR ~ Grinding + Toxin + Preprocessing + Variable_Selection + Downsampling + Dataset + Weighting + (1|Split), data = lme_data, family = ordbeta(link = "logit"),
+control = glmmTMBControl(optCtrl = list(iter.max = 1000, eval.max = 1000)))
+Anova(model_tpr, type = "II")
+summary(model_tpr)
+
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+icc(model_tpr)
+r2(model_tpr)
+
+```
+
+### Model validation for TPR
+
+```{r}
+## Model validation
+library(DHARMa)
+sim_tpr <- simulateResiduals(model_tpr, plot = TRUE)
+plot(sim_tpr)
+## the KS test is notoriously hyper-sensitive. These are your exact TPR scores of 0 and 1. DHARMa frequently flags these boundary values as "outliers" because the observed data hit those exact floors and ceilings slightly more (or less) often than the simulated data expected. It is a mathematical artifact of the simulation process, not a failure of your model.
+plotResiduals(sim_tpr, form = lme_data$Grinding)
+## Perfect symmetry, the levene test is not significant.
+# determine the ICC (intraclass correlation) of the model
+library(performance)
+library(see)
+icc(model_tpr)
+r2(model_tpr) #explain 91.1% of the variance in TPR score
+check_collinearity(model_tpr) # there is no collinearity issue in the model
+pp_check_tpr <- check_predictions(model_tpr)
+plot(pp_check_tpr) # prediction fit well with the observed data
+```
+
+### Plotting for each factor for TPR
+
+```{r}
+effects <- c("Grinding", "Toxin", "Preprocessing", "Variable_Selection", "Downsampling", "Dataset", "Weighting")
+effect_plots_tpr <- lapply(effects, function(effect) {
+  plot_effect(model_tpr, factor = effect, title = paste("Main Effect of", effect, "on TPR Score"), y = "Estimated TPR Score")
+})
+names(effect_plots_tpr) <- effects
+
+# Combining all effects into a single plot
+combined_effect_tpr_plot <- ggarrange(plotlist = 
+  effect_plots_tpr$Dataset$plot, effect_plots_tpr$Downsampling$plot, effect_plots_tpr$Grinding$plot, effect_plots_tpr$Toxin$plot, effect_plots_tpr$Weighting$plot, effect_plots_tpr$Preprocessing$plot, effect_plots_tpr$Variable_Selection$plot, 
+  ncol = 4, nrow = 2, labels = c("A", "B", "C", "D", "E", "F", "G"))
+
+combined_effects_tpr <- annotate_figure(
+  combined_effect_tpr_plot,
+  top = text_grob(
+    "Main Effects of Pipeline Parameters on Estimated TPR Score",     
+    color = "black",
+    face = "bold",  
+    size = 14,
+    vjust = 0.5
+  )
+)
+combined_effects_tpr
+ggsave("./figures/PLS_DA/total_don/tpr_main_effects.svg", combined_effects_tpr, width = 12, height = 6, dpi = 300)
+```
+
+### Pipeline plotting for TPR
+
+```{r}
+# Get marginal means for all combinations
+pipeline_means_tpr <- emmeans(model_tpr, 
+                          ~ Grinding * Toxin * Preprocessing * 
+                            Variable_Selection * Downsampling * 
+                            Dataset * Weighting)
+
+# plot the top 10 pipelines
+pipeline_tpr <- plot_top_pipelines(pipeline_means_tpr, metric_name = "TPR")
+ggsave("./figures/PLS_DA/total_don/tpr_top10_pipelines.svg", pipeline_tpr, width = 10, height = 6, dpi = 300)
+```
+
+### Plotting for TPR and TNR
+```{r}
+# Plot TPR
+tp_plot <- density_plot(lme_data, lme_data$TPR, color = "TPR", label = "True Positive Rate", title = "TPR of all pipelines") + scale_fill_manual(values = c("TPR" = "#DB1A1A"))
+tp_dataset_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Dataset, label = "True Positive Rate", title = "Effect of Dataset")
+tp_downsampling_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Downsampling, label = "True Positive Rate", title = "Effect of Downsampling")
+tp_weighting_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Weighting, label = "True Positive Rate", title = "Effect of Weighting")
+tp_toxin_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Toxin, label = "True Positive Rate", title = "Effect of Toxin")
+tp_grinding_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Grinding, label = "True Positive Rate", title = "Effect of Grinding")
+tp_preprocessing_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Preprocessing, label = "True Positive Rate", title = "Effect of Preprocessing")
+tp_variable_selection_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Variable_Selection, label = "True Positive Rate", title = "Effect of Variable Selection")
+
+tpr_plots <- ggarrange(tp_plot, tp_weighting_plot, tp_downsampling_plot, tp_toxin_plot, tp_dataset_plot, tp_grinding_plot, tp_preprocessing_plot, tp_variable_selection_plot,
+          ncol = 4, nrow = 2)
+ggsave("./figures/PLS_DA/total_don/tpr_density_plots.svg", tpr_plots, width = 12, height = 6)
+
+# Plot TNR
+tn_plot <- density_plot(lme_data, lme_data$TNR, color = "TNR", label = "True Negative Rate", title = "TNR of all pipelines") + scale_fill_manual(values = c("TNR" = "#2FA4D7"))
+tn_dataset_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Dataset, label = "True Negative Rate", title = "Effect of Dataset") 
+tn_downsampling_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Downsampling, label = "True Negative Rate", title = "Effect of Downsampling") + scale_y_continuous(limits = c(0, 7))
+tn_weighting_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Weighting, label = "True Negative Rate", title = "Effect of Weighting")
+tn_toxin_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Toxin, label = "True Negative Rate", title = "Effect of Toxin")
+tn_grinding_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Grinding, label = "True Negative Rate", title = "Effect of Grinding")
+tn_preprocessing_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Preprocessing, label = "True Negative Rate", title = "Effect of Preprocessing")
+tn_variable_selection_plot <- density_plot(lme_data, lme_data$TNR, lme_data$Variable_Selection, label = "True Negative Rate", title = "Effect of Variable Selection")
+tnr_plots <- ggarrange(tn_plot, tn_weighting_plot, tn_downsampling_plot, tn_toxin_plot, tn_dataset_plot, tn_grinding_plot, tn_preprocessing_plot, tn_variable_selection_plot,
+          ncol = 4, nrow = 2)
+ggsave("./figures/PLS_DA/total_don/tnr_density_plots.svg", tnr_plots, width = 12, height = 6)
+
+```

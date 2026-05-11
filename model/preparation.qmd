@@ -389,6 +389,86 @@ DON_4_country_plot <- ggarrange(
 ggsave("./figures/preprocessing/Distribution_Country.svg", DON_Total_DON_plot, width = 8, height = 5)
 ggsave("./figures/preprocessing/Distribution_Country_DON_4.svg", DON_4_country_plot, width = 16, height = 10)
 
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+df_boxplot <- y_total_cleaned %>%
+  # 1. Select columns
+  select(Country, Deoxynivalenol, `Total DON`, DON_4, Total_DON_4) %>%
+  # 2. Rename them to share a consistent pattern (ToxinName_ColumnType)
+  rename(
+    DON_Value = Deoxynivalenol,
+    TotalDON_Value = `Total DON`,
+    DON_Class = DON_4,
+    TotalDON_Class = Total_DON_4
+  ) %>%
+  
+  # 3. Pivot multiple sets of columns at the same time
+  pivot_longer(
+    cols = -Country,                      # Keep Country as it is
+    names_to = c("Toxin_Type", ".value"), # Split the column names into two parts
+    names_sep = "_"                       # Tell it to split at the underscore
+  )
+df_boxplot$certainty <- ifelse(df_boxplot$Class == "UNC" | df_boxplot$Class == "UC", "Uncertain", "Certain")
+
+# Load the required visualization library
+library(ggplot2)
+library(scales)
+
+# First, let's make sure Toxin_Type is a factor so it plots in the exact order we want 
+# on the x-axis. This makes drawing our threshold lines much easier!
+df_boxplot$Toxin_Type <- factor(df_boxplot$Toxin_Type, levels = c("DON", "TotalDON"))
+
+threshold_limits <- data.frame(
+  Toxin_Type = factor(c("DON", "TotalDON"), levels = c("DON", "TotalDON")),
+  Limit = c(1000, 1250)
+)
+
+boxplot_DON<- ggplot(df_boxplot, aes(x = Country, y = Value)) + 
+                  geom_boxplot(outlier.shape = NA, width = 0.5, fill = "white", color = "black") +
+                  geom_jitter(aes(shape = Class, color = Class), width = 0.15, 
+                              alpha = 0.8, size = 2.5) +
+                  facet_wrap(~ Toxin_Type, labeller = as_labeller(c("DON" = "DON", "TotalDON" = "Total DON"))) +
+                  geom_hline(data = threshold_limits, aes(yintercept = Limit), 
+                            color = "gray", linetype = "dashed", linewidth = 1) +
+                  scale_shape_manual(
+                    values = c("C" = 16, "NC" = 16, "UC" = 17, "UNC" = 17),
+                    labels = c("C" = "Compliant", 
+                              "NC" = "Non-Compliant", 
+                              "UC" = "Uncertain Compliant", 
+                              "UNC" = "Uncertain Non-Compliant")
+                  ) + 
+                  
+                  # Assign colors and use the EXACT same labels so ggplot merges the legends
+                  scale_color_manual(
+                    values = c("C" = "#1982c4", "NC" = "#ef233c", "UC" = "#b6d5e9", "UNC" = "#f7c1bb"),
+                    labels = c("C" = "Compliant", 
+                              "NC" = "Non-Compliant", 
+                              "UC" = "Uncertain Compliant", 
+                              "UNC" = "Uncertain Non-Compliant")
+                  ) + 
+                  scale_y_continuous(trans = "sqrt", 
+                                    breaks = c(0, 100, 1000, 1250, 5000, 10000, 15000, 20000)) +
+                  
+                  theme_classic() +
+                  labs(
+                    y = "Concentration (ppb)",
+                    x = "",
+                    shape = "Classification", 
+                    color = "Classification"  
+                  ) +
+                  theme(
+                    legend.position = "top",
+                    legend.title = element_blank(),
+                    strip.text = element_text(size = 12, face = "bold"),
+                    axis.text.x = element_text(size = 12),
+                    axis.title.y = element_text(size = 12),
+                    legend.text = element_text(size = 12), 
+                    panel.grid.major.x = element_blank(),
+                    panel.spacing = unit(1, "lines") 
+                  )
+boxplot_DON
+ggsave("./figures/preprocessing/Distribution_Country_Boxplot.svg", boxplot_DON, width = 10, height = 6, dpi = 300)
 
 ## Plot the percentage of compliant and non-compliant samples and its uncertainty for DON and Total DON
 source("./utils/plotting.R")
@@ -411,6 +491,45 @@ donut_austria <- ggarrange(
 )
 ggsave("./figures/preprocessing/Distribution_DON_Donut_Austria.svg", donut_austria, width = 16, height = 10)
 
+## Cross-label between DON and Total DON
+y_total_cleaned$cross_label <- ifelse(
+  y_total_cleaned$DON_2 == "C" & y_total_cleaned$Total_DON_2 == "NC", "Cross-Positive",
+  ifelse(
+    y_total_cleaned$DON_2 == "NC" & y_total_cleaned$Total_DON_2 == "C", "Cross-Negative",
+    "Consistent"
+  )
+)
+
+# select only the cross-Negative and cross-positive samples and make the rownmames as the sample ID
+cross_samples <- y_total_cleaned %>%
+  filter(cross_label != "Consistent") %>%
+  select(cross_label, DON = Deoxynivalenol, Total_DON = `Total DON`) %>%
+  rownames_to_column("Sample_ID")
+#melt the data for plotting
+library(reshape2)
+cross_samples_long <- melt(cross_samples, id.vars = c("Sample_ID", "cross_label"), measure.vars = c("DON", "Total_DON"), variable.name = "DON_Type", value.name = "DON_Value")
+
+cross_plot <- ggplot(cross_samples_long, aes(x = Sample_ID, y = DON_Value, color = cross_label, shape = DON_Type)) +
+  geom_point(size = 3, position = position_dodge(width = 0.5) ) +
+  geom_errorbar(aes(ymin = DON_Value * 0.7, ymax = DON_Value * 1.3), width = 0.2, position = position_dodge(width = 0.5) ) +
+  geom_hline(yintercept = c(1000, 1250), linetype = "dashed", color = "gray50", size = 0.8) +
+  annotate("text", x = Inf, y = 1000, label = "DON Threshold", vjust = -0.5, hjust = -0.1, color = "gray30", fontface = "bold") +
+  annotate("text", x = Inf, y = 1250, label = "Total DON Threshold", vjust = -0.5, hjust = -0.1, color = "gray30", fontface = "bold") +
+  
+  labs(title = "Cross-label Samples between DON and Total DON", 
+       x = "Deoxynivalenol (ppb)", 
+       y = "Total DON (ppb)") +
+  theme_classic() +
+  scale_y_continuous(limits = c(500, max(cross_samples_long$DON_Value) * 1.5)) +
+  scale_color_manual(values = c("Cross-Negative" = "#FFC20A", "Cross-Positive" = "#0C7BDC")) +
+  coord_cartesian(clip = "off") +
+  
+  theme(legend.position = "top",
+        legend.title = element_blank(),
+        plot.margin = margin(10, 120, 10, 10))
+
+#export the plot
+ggsave("./figures/preprocessing/Cross_label_samples.svg", cross_plot, width = 10, height = 6, dpi = 300)
 ```
 
 ## Splitting the data into training and test set

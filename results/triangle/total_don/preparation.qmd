@@ -1,0 +1,662 @@
+---
+title: "Untitled"
+format: html
+---
+
+# Introduction
+This document consists of all preprocessing prior to PLS-DA model. The data will split into training and test set and based on the country origin of the samples.
+
+## Load the dataset
+
+```{r}
+# Load the dataset
+library(readxl)
+library(dplyr)
+library(tibble)
+X_initial <- list(
+    intact = read_excel("data/nirs_intact.xlsx") %>%
+    column_to_rownames("Sample_ID") %>% dplyr::select(-(1:12), -("400":"1099.5")),
+    ground = read_excel("data/nirs_milled.xlsx") %>%
+    column_to_rownames("Sample_ID") %>% dplyr::select(-("400":"1099.5"))
+)
+y_initial <- read_excel("data/nirs_intact.xlsx") %>%
+    column_to_rownames("Sample_ID") %>% dplyr::select(1:12)
+
+# transform Deoxynivalenol and Total DON to binary variables based on the threshold of 1000 ppb and 1000 ppb, respectively.
+# the uncertainty level of DON is 30% (Ur)
+# C: compliant, NC: non-compliant, U: uncertain
+uncertainty <- 0.3
+y_initial <- y_initial %>%
+    mutate(DON_2 = ifelse(Deoxynivalenol < 1000, "C", "NC"),
+           Total_DON_2 = ifelse(`Total DON` < 1000, "C", "NC"))
+y_initial <- y_initial %>%
+    mutate(DON_4 = ifelse(Deoxynivalenol < (1000 * (1 - uncertainty)), "C", ifelse(Deoxynivalenol > (1000 * (1 + uncertainty)), "NC", ifelse(Deoxynivalenol < (1000 * (1 + uncertainty)) & Deoxynivalenol > 1000, "UNC", "UC"))),
+           Total_DON_4 = ifelse(`Total DON` < (1000 * (1 - uncertainty)), "C", ifelse(`Total DON` > (1000 * (1 + uncertainty)), "NC", ifelse(`Total DON` < (1000 * (1 + uncertainty)) & `Total DON` > 1000, "UNC", "UC"))))
+cols <- c("year", "Country", "DON_2", "Total_DON_2", "DON_4", "Total_DON_4")
+y_initial[cols] <- lapply(y_initial[cols], as.factor)
+str(y_initial)
+```
+
+## Analysis on combined dataset
+### Outlier detection using PCA
+Outlier detection using Hotelling's T-squared statistic and Q-residuals with the ncomp explained > 99%. The samples that exceed the 95% confidence limit in either of these statistics are considered outliers.
+
+```{r}
+library(mdatools)
+outliers_pca_total <- lapply(X_initial, function(X) {
+    pca_model <- pca(X, ncomp = 3, center = TRUE, scale = TRUE)
+})
+
+#plotting the PCA results to visualize outliers
+## intact samples
+plotCumVariance(outliers_pca_total$intact, show.labels = TRUE)
+plotDistances(outliers_pca_total$intact, show.labels = TRUE) # 99631 is an outlier
+
+## ground samples
+plotCumVariance(outliers_pca_total$ground, show.labels = TRUE)
+plotDistances(outliers_pca_total$ground, show.labels = TRUE) # AT5-8185-05 is an outlier
+
+## remove the outliers from the all datasets
+X_total_cleaned <- lapply(X_initial, function(X){
+    X[!(rownames(X) %in% c("99631", "AT5-8185-05")), ]
+})
+y_total_cleaned <- y_initial[!(rownames(y_initial) %in% c("99631", "AT5-8185-05")), ]
+```
+
+### Plotting the spectra
+
+```{r}
+## apply spectral preprocessing methods to the cleaned datasets
+library(prospectr)
+X_total_prep <- lapply(X_total_cleaned, function(df) {
+  list(
+    Raw = df,
+    SNV = standardNormalVariate(savitzkyGolay(df, m = 0, p = 2, w = 15)),
+    D1  = savitzkyGolay(df, m = 1, p = 2, w = 15)
+  )
+})
+
+## long format for plotting
+library(reshape2)
+library(dplyr)
+X_total_long <- lapply(X_total_prep, function(grinding) {
+    lapply(grinding, function(X) {
+        X %>% as.data.frame() %>%
+        rownames_to_column("Sample_ID") %>%
+        melt(id.vars = "Sample_ID", variable.name = "Wavelength", value.name = "Reflectance") %>%
+        left_join(y_total_cleaned %>% rownames_to_column("Sample_ID") %>% select(Sample_ID, year, Country, DON_2, DON_4, Total_DON_2, Total_DON_4), by = "Sample_ID")
+    })
+})
+
+source("./utils/plotting.R")
+library(ggpubr)
+
+# Define the colors for the variables
+meta_vars <- c("Country", "year", "DON_2", "Total_DON_2", "DON_4", "Total_DON_4")
+
+lapply(meta_vars, function(var) {
+  
+  plot_list <- lapply(names(X_total_long), function(grp) {
+
+    lapply(names(X_total_long[[grp]]), function(meth) {
+
+      y_label <- if (meth == "D1") {
+        expression(frac(d(log(1/R)), d*lambda))
+      } else {
+        "log (1/R)"
+      }
+
+      title <- paste0(toupper(grp), " - ", meth)
+
+      plot_spectra(
+        X_total_long[[grp]][[meth]],
+        title = title,
+        y_label = y_label,
+        color = var
+      )
+    })
+
+  }) %>% unlist(recursive = FALSE)
+
+  # Create the grid
+  combined_plot <- ggarrange(
+    plotlist = plot_list,
+    ncol = 3, nrow = 2,
+    align = "hv", common.legend = TRUE, legend = "top"
+  )
+  
+  # Save using the variable name in the filename
+  ggsave(paste0("./figures/preprocessing/", var, "_spectra.png"), 
+         combined_plot, width = 16, height = 10)
+})
+```
+
+### Plotting the pca scores
+```{r}
+#import the library
+library(mdatools)
+pca_total_long <- lapply(X_total_prep, function(grinding) {
+    lapply(grinding, function(X) {
+        #run pca
+        model <- pca(X, ncomp = 3, center = TRUE, scale = FALSE)
+        
+        model$calres$scores %>% as.data.frame() %>%
+        rownames_to_column("Sample_ID") %>%
+        left_join(y_total_cleaned %>% rownames_to_column("Sample_ID") %>% 
+        select(Sample_ID, year, Country, DON_2, DON_4, Total_DON_2, Total_DON_4), by = "Sample_ID")
+    })
+})
+
+pca_var_total_long <- lapply(X_total_prep, function(grinding) {
+    lapply(grinding, function(X) {
+        #run pca
+        model <- pca(X, ncomp = 3, center = TRUE, scale = FALSE)
+        return(model$calres$expvar)
+    })
+})
+
+# Define the colors for the variables
+meta_vars <- c("year", "DON_2", "Total_DON_2", "DON_4", "Total_DON_4")
+
+source("./utils/plotting.R")
+lapply(meta_vars, function(var) {
+  
+  plot_list <- lapply(names(pca_total_long), function(grp) {
+    lapply(names(X_total_long[[grp]]), function(meth) {
+        plot_pca(
+            pca_total_long[[grp]][[meth]],
+            pca_var_total_long[[grp]][[meth]],
+            title = paste0(toupper(grp), " - ", meth),
+            color = var,
+            shape = "Country"
+        )
+        }) 
+  })%>% unlist(recursive = FALSE)
+
+  # Create the grid
+  combined_plot <- ggarrange(
+    plotlist = plot_list,
+    ncol = 3, nrow = 2,
+    align = "hv", common.legend = TRUE, legend = "top"
+  )
+  
+  # Save using the variable name in the filename
+  ggsave(paste0("./figures/PCA/", var, "_pca.svg"), 
+         combined_plot, width = 16, height = 10)
+})
+```
+
+## Analysis on Austrian samples
+### outlier detection using PCA
+
+```{r}
+# Subset the data for Austrian samples
+X_austria <- lapply(X_initial, function(X) {
+    X[y_initial$Country == "Austria", ]
+})
+y_austria <- y_initial[y_initial$Country == "Austria", ]
+
+library(mdatools)
+outliers_pca_austria <- lapply(X_austria, function(X) {
+    pca_model <- pca(X, ncomp = 2, center = TRUE, scale = TRUE)
+})
+
+#plotting the PCA results to visualize outliers
+## intact samples
+plotCumVariance(outliers_pca_austria$intact, show.labels = TRUE)
+plotDistances(outliers_pca_austria$intact, show.labels = TRUE) # 99631 is an outlier
+
+## ground samples
+plotCumVariance(outliers_pca_austria$ground, show.labels = TRUE)
+plotDistances(outliers_pca_austria$ground, show.labels = TRUE) # 99022 and 99098 are outliers
+
+## remove the outliers from the all datasets
+X_austria_cleaned <- lapply(X_austria, function(X){
+    X[!(rownames(X) %in% c("99631", "99022", "99098")), ]
+})
+y_austria_cleaned <- y_austria[!(rownames(y_austria) %in% c("99631", "99022", "99098")), ]
+```
+
+### Plotting the spectra
+
+```{r}
+## apply spectral preprocessing methods to the cleaned datasets
+library(prospectr)
+X_austria_prep <- lapply(X_austria_cleaned, function(df) {
+  list(
+    Raw = df,
+    SNV = standardNormalVariate(savitzkyGolay(df, m = 0, p = 2, w = 15)),
+    D1  = savitzkyGolay(df, m = 1, p = 2, w = 15)
+  )
+})
+
+## long format for plotting
+library(reshape2)
+library(dplyr)
+X_austria_long <- lapply(X_austria_prep, function(grinding) {
+    lapply(grinding, function(X) {
+        X %>% as.data.frame() %>%
+        rownames_to_column("Sample_ID") %>%
+        melt(id.vars = "Sample_ID", variable.name = "Wavelength", value.name = "Reflectance") %>%
+        left_join(y_austria_cleaned %>% rownames_to_column("Sample_ID") %>% select(Sample_ID, year, Country, DON_2, DON_4, Total_DON_2, Total_DON_4), by = "Sample_ID")
+    })
+})
+
+source("./utils/plotting.R")
+library(ggpubr)
+
+# Define the colors for the variables
+meta_vars <- c("year", "DON_2", "Total_DON_2", "DON_4", "Total_DON_4")
+
+lapply(meta_vars, function(var) {
+  
+  plot_list <- lapply(names(X_austria_long), function(grp) {
+
+    lapply(names(X_austria_long[[grp]]), function(meth) {
+
+      y_label <- if (meth == "D1") {
+        expression(frac(d(log(1/R)), d*lambda))
+      } else {
+        "log (1/R)"
+      }
+
+      title <- paste0(toupper(grp), " - ", meth)
+
+      plot_spectra(
+        X_austria_long[[grp]][[meth]],
+        title = title,
+        y_label = y_label,
+        color = var
+      )
+    })
+
+  }) %>% unlist(recursive = FALSE)
+
+  # Create the grid
+  combined_plot <- ggarrange(
+    plotlist = plot_list,
+    ncol = 3, nrow = 2,
+    align = "hv", common.legend = TRUE, legend = "top"
+  )
+  
+  # Save using the variable name in the filename
+  ggsave(paste0("./figures/preprocessing/Austria_", var, "_spectra.svg"), 
+         combined_plot, width = 16, height = 10)
+})
+```
+
+### Plotting the pca scores
+```{r}
+#import the library
+library(mdatools)
+pca_austria_long <- lapply(X_austria_prep, function(grinding) {
+    lapply(grinding, function(X) {
+        #run pca
+        model <- pca(X, ncomp = 3, center = TRUE, scale = FALSE)
+        
+        model$calres$scores %>% as.data.frame() %>%
+        rownames_to_column("Sample_ID") %>%
+        left_join(y_austria_cleaned %>% rownames_to_column("Sample_ID") %>% 
+        select(Sample_ID, year, Country, DON_2, DON_4, Total_DON_2, Total_DON_4), by = "Sample_ID")
+    })
+})
+
+pca_var_austria_long <- lapply(X_austria_prep, function(grinding) {
+    lapply(grinding, function(X) {
+        #run pca
+        model <- pca(X, ncomp = 3, center = TRUE, scale = FALSE)
+        return(model$calres$expvar)
+    })
+})
+
+# Define the colors for the variables
+meta_vars <- c("year", "DON_2", "Total_DON_2", "DON_4", "Total_DON_4")
+
+source("./utils/plotting.R")
+lapply(meta_vars, function(var) {
+  
+  plot_list <- lapply(names(pca_austria_long), function(grp) {
+    lapply(names(X_austria_long[[grp]]), function(meth) {
+        plot_pca(
+            pca_austria_long[[grp]][[meth]],
+            pca_var_austria_long[[grp]][[meth]],
+            title = paste0(toupper(grp), " - ", meth),
+            color = var
+        )
+        }) 
+  })%>% unlist(recursive = FALSE)
+
+  # Create the grid
+  combined_plot <- ggarrange(
+    plotlist = plot_list,
+    ncol = 3, nrow = 2,
+    align = "hv", common.legend = TRUE, legend = "top"
+  )
+  
+  # Save using the variable name in the filename
+  ggsave(paste0("./figures/PCA/Austria_", var, "_pca.svg"), 
+         combined_plot, width = 16, height = 10)
+})
+```
+
+## Plotting the distribution of the metadata variables
+### Plot for the combined dataset
+
+```{r}
+## Plot the distribution of the country variable
+y_total_cleaned$DON_4 <- factor(y_total_cleaned$DON_4, levels = c("C", "UC", "UNC", "NC"))
+y_total_cleaned$Total_DON_4 <- factor(y_total_cleaned$Total_DON_4, levels = c("C", "UC", "UNC", "NC"))
+
+source("./utils/plotting.R")
+DON_country <-plot_stacked_counts(
+            data = y_total_cleaned, 
+            x_var = "Country", 
+            fill_var = "DON_2", 
+            title = "Distribution of DON by Country", 
+            x_label = "DON"
+            )
+Total_DON_country <- plot_stacked_counts(
+            data = y_total_cleaned, 
+            x_var = "Country", 
+            fill_var = "Total_DON_2", 
+            title = "Distribution of Total DON by Country", 
+            x_label = "Total DON"
+            )
+DON_4_country <- plot_stacked_counts(
+            data = y_total_cleaned, 
+            x_var = "Country", 
+            fill_var = "DON_4", 
+            title = "Distribution of DON with Uncertainty by Country", 
+            x_label = "DON with Uncertainty"
+            )
+Total_DON_4_country <- plot_stacked_counts(
+            data = y_total_cleaned, 
+            x_var = "Country", 
+            fill_var = "Total_DON_4", 
+            title = "Distribution of Total DON with Uncertainty by Country", 
+            x_label = "Total DON with Uncertainty"
+            )
+DON_Total_DON_plot <- ggarrange(
+    DON_country, Total_DON_country,
+    ncol = 2, nrow = 1,
+    align = "hv", common.legend = TRUE, legend = "top"
+)
+DON_4_country_plot <- ggarrange(
+    DON_4_country, Total_DON_4_country,
+    ncol = 2, nrow = 1,
+    align = "hv", common.legend = TRUE, legend = "top"
+)
+ggsave("./figures/PLS_DA/total_don/Distribution_Country.svg", DON_Total_DON_plot, width = 8, height = 5)
+ggsave("./figures/PLS_DA/total_don/Distribution_Country_DON_4.svg", DON_4_country_plot, width = 16, height = 10)
+
+library(tidyr)
+library(dplyr)
+library(ggpubr)
+library(ggplot2)
+df_boxplot <- y_total_cleaned %>%
+  # 1. Select columns
+  select(Country, Deoxynivalenol, `Total DON`, DON_4, Total_DON_4) %>%
+  # 2. Rename them to share a consistent pattern (ToxinName_ColumnType)
+  rename(
+    DON_Value = Deoxynivalenol,
+    TotalDON_Value = `Total DON`,
+    DON_Class = DON_4,
+    TotalDON_Class = Total_DON_4
+  ) %>%
+  
+  # 3. Pivot multiple sets of columns at the same time
+  pivot_longer(
+    cols = -Country,                      # Keep Country as it is
+    names_to = c("Toxin_Type", ".value"), # Split the column names into two parts
+    names_sep = "_"                       # Tell it to split at the underscore
+  )
+df_boxplot$certainty <- ifelse(df_boxplot$Class == "UNC" | df_boxplot$Class == "UC", "Uncertain", "Certain")
+
+# Load the required visualization library
+library(ggplot2)
+library(scales)
+
+# First, let's make sure Toxin_Type is a factor so it plots in the exact order we want 
+# on the x-axis. This makes drawing our threshold lines much easier!
+df_boxplot$Toxin_Type <- factor(df_boxplot$Toxin_Type, levels = c("DON", "TotalDON"))
+
+threshold_limits <- data.frame(
+  Toxin_Type = factor(c("DON", "TotalDON"), levels = c("DON", "TotalDON")),
+  Limit = c(1000)
+)
+
+boxplot_DON<- ggplot(df_boxplot, aes(x = Country, y = Value)) + 
+                  geom_boxplot(outlier.shape = NA, width = 0.5, fill = "white", color = "black") +
+                  geom_jitter(aes(shape = Class, color = Class), width = 0.15, 
+                              alpha = 0.8, size = 2.5) +
+                  facet_wrap(~ Toxin_Type, labeller = as_labeller(c("DON" = "DON", "TotalDON" = "Total DON"))) +
+                  geom_hline(data = threshold_limits, aes(yintercept = Limit), 
+                            color = "gray", linetype = "dashed", linewidth = 1) +
+                  scale_shape_manual(
+                    values = c("C" = 16, "NC" = 16, "UC" = 17, "UNC" = 17),
+                    labels = c("C" = "Compliant", 
+                              "NC" = "Non-Compliant", 
+                              "UC" = "Uncertain Compliant", 
+                              "UNC" = "Uncertain Non-Compliant")
+                  ) + 
+                  
+                  # Assign colors and use the EXACT same labels so ggplot merges the legends
+                  scale_color_manual(
+                    values = c("C" = "#1982c4", "NC" = "#ef233c", "UC" = "#b6d5e9", "UNC" = "#f7c1bb"),
+                    labels = c("C" = "Compliant", 
+                              "NC" = "Non-Compliant", 
+                              "UC" = "Uncertain Compliant", 
+                              "UNC" = "Uncertain Non-Compliant")
+                  ) + 
+                  scale_y_continuous(trans = "sqrt", 
+                                    breaks = c(0, 100, 1000, 5000, 10000, 15000, 20000)) +
+                  
+                  theme_classic() +
+                  labs(
+                    y = "Concentration (ppb)",
+                    x = "",
+                    shape = "Classification", 
+                    color = "Classification"  
+                  ) +
+                  theme(
+                    legend.position = "top",
+                    legend.title = element_blank(),
+                    strip.text = element_text(size = 12, face = "bold"),
+                    axis.text.x = element_text(size = 12),
+                    axis.title.y = element_text(size = 12),
+                    legend.text = element_text(size = 12), 
+                    panel.grid.major.x = element_blank(),
+                    panel.spacing = unit(1, "lines") 
+                  )
+boxplot_DON
+ggsave("./figures/PLS_DA/total_don/Distribution_Country_Boxplot.svg", boxplot_DON, width = 10, height = 6, dpi = 300)
+
+## Plot the percentage of compliant and non-compliant samples and its uncertainty for DON and Total DON
+source("./utils/plotting.R")
+DON_donut_total <- plot_piedonut(main = y_total_cleaned, inner_donut = "DON_2", outer_donut = "DON_4", title = "Distribution of DON with Uncertainty")
+Total_DON_donut_total <- plot_piedonut(main = y_total_cleaned, inner_donut = "Total_DON_2", outer_donut = "Total_DON_4", title = "Distribution of Total DON with Uncertainty")
+donut_total <- ggarrange(
+    DON_donut_total, Total_DON_donut_total,
+    ncol = 2, nrow = 1,
+    align = "hv", common.legend = TRUE, legend = "top"
+)
+ggsave("./figures/PLS_DA/total_don/Distribution_DON_Donut.svg", donut_total, width = 16, height = 10)
+
+## Plot the percentage of compliant and non-compliant samples and its uncertainty for DON and Total DON in Austria
+DON_donut_austria <- plot_piedonut(main = y_austria_cleaned, inner_donut = "DON_2", outer_donut = "DON_4", title = "Distribution of DON with Uncertainty in Austria Dataset")
+Total_DON_donut_austria <- plot_piedonut(main = y_austria_cleaned, inner_donut = "Total_DON_2", outer_donut = "Total_DON_4", title = "Distribution of Total DON with Uncertainty in Austria Dataset")
+donut_austria <- ggarrange(
+    DON_donut_austria, Total_DON_donut_austria,
+    ncol = 2, nrow = 1,
+    align = "hv", common.legend = TRUE, legend = "top"
+)
+ggsave("./figures/PLS_DA/total_don/Distribution_DON_Donut_Austria.svg", donut_austria, width = 16, height = 10)
+
+## Cross-label between DON and Total DON
+y_total_cleaned$cross_label <- ifelse(
+  y_total_cleaned$DON_2 == "C" & y_total_cleaned$Total_DON_2 == "NC", "Cross-Positive",
+  ifelse(
+    y_total_cleaned$DON_2 == "NC" & y_total_cleaned$Total_DON_2 == "C", "Cross-Negative",
+    "Consistent"
+  )
+)
+
+# select only the cross-Negative and cross-positive samples and make the rownmames as the sample ID
+cross_samples <- y_total_cleaned %>%
+  filter(cross_label != "Consistent") %>%
+  select(cross_label, DON = Deoxynivalenol, Total_DON = `Total DON`) %>%
+  rownames_to_column("Sample_ID")
+#melt the data for plotting
+library(reshape2)
+cross_samples_long <- melt(cross_samples, id.vars = c("Sample_ID", "cross_label"), measure.vars = c("DON", "Total_DON"), variable.name = "DON_Type", value.name = "DON_Value")
+
+cross_plot <- ggplot(cross_samples_long, aes(x = Sample_ID, y = DON_Value, color = cross_label, shape = DON_Type)) +
+  geom_point(size = 3, position = position_dodge(width = 0.5) ) +
+  geom_errorbar(aes(ymin = DON_Value * 0.7, ymax = DON_Value * 1.3), width = 0.2, position = position_dodge(width = 0.5) ) +
+  geom_hline(yintercept = 1000, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+  annotate("text", x = Inf, y = 1000, label = "DON Threshold", vjust = -0.5, hjust = -0.1, color = "gray30", fontface = "bold") +
+  
+  labs(title = "Cross-label Samples between DON and Total DON", 
+       x = "Deoxynivalenol (ppb)", 
+       y = "Total DON (ppb)") +
+  theme_classic() +
+  scale_y_continuous(limits = c(500, max(cross_samples_long$DON_Value) * 1.5)) +
+  scale_color_manual(values = c("Cross-Negative" = "#FFC20A", "Cross-Positive" = "#0C7BDC")) +
+  coord_cartesian(clip = "off") +
+  
+  theme(legend.position = "top",
+        legend.title = element_blank(),
+        plot.margin = margin(10, 120, 10, 10),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 10))
+
+#export the plot
+ggsave("./figures/PLS_DA/total_don/Cross_label_samples.svg", cross_plot, width = 10, height = 6, dpi = 300)
+```
+
+## Splitting the data into training and test set
+Splitting will be done for 100 times each with preserving the distribution of the compliant, non-compliant and uncertain samples in the training and test set. The splitting will be based on all country and austrian samples, separately.
+### Splitting for the combined dataset
+
+```{r}
+library(dplyr)
+library(rsample)
+
+## check whether the rownames of y_total_cleaned are the same as the rownames of X_total_cleaned
+all(rownames(y_total_cleaned) == rownames(X_total_cleaned$intact)) # TRUE
+all(rownames(y_total_cleaned) == rownames(X_total_cleaned$ground)) # TRUE
+
+# Prep the stratification column for total dataset
+data_to_split_total <- y_total_cleaned %>%
+  mutate(Stratify_Group = paste(DON_2, DON_4, sep = "_"))
+y_total_final <- y_total_cleaned %>%
+  select(
+    DON = Deoxynivalenol,
+    Total_DON = `Total DON`
+  )
+
+
+# Generate the 100 perfectly stratified splits
+set.seed(123)
+cv_splits <- mc_cv(data_to_split_total, prop = 0.80, times = 100, strata = Stratify_Group)
+
+# Loop through the 100 splits
+for (i in 1:nrow(cv_splits)) {
+  
+  # 1. Extract the integer indices for this specific split
+  train_indices <- cv_splits$splits[[i]]$in_id
+  
+  # 2. Slice all matrices simultaneously
+  # --- Intact Spectra ---
+  X_intact_train <- X_total_cleaned$intact[train_indices, ]
+  X_intact_test  <- X_total_cleaned$intact[-train_indices, ]
+  
+  # --- Ground Spectra ---
+  X_ground_train <- X_total_cleaned$ground[train_indices, ]
+  X_ground_test  <- X_total_cleaned$ground[-train_indices, ]
+  
+  # --- Target (Y) Data ---
+  y_train <- y_total_final[train_indices, ]
+  y_test  <- y_total_final[-train_indices, ]
+  
+  # 3. Format the split number so files align perfectly (001, 002... 100)
+  split_num <- sprintf("%03d", i)
+  
+  # 4. Export all 6 files for the current iteration
+  write.csv(X_intact_train, paste0("./data/train_test_set_all/X_intact_train_", split_num, ".csv"))
+  write.csv(X_intact_test,  paste0("./data/train_test_set_all/X_intact_test_", split_num, ".csv"))
+  
+  write.csv(X_ground_train, paste0("./data/train_test_set_all/X_ground_train_", split_num, ".csv"))
+  write.csv(X_ground_test,  paste0("./data/train_test_set_all/X_ground_test_", split_num, ".csv"))
+  
+  write.csv(y_train, paste0("./data/train_test_set_all/y_train_", split_num, ".csv"))
+  write.csv(y_test,  paste0("./data/train_test_set_all/y_test_", split_num, ".csv"))
+  
+  # Print progress to the console
+  if (i %% 10 == 0) cat("Exported full datasets for split", i, "of 100...\n")
+}
+
+cat("Finished! All 600 datasets are saved in the 'train_test_set_all' folder.\n")
+
+```
+
+### Splitting for the Austrian dataset
+
+```{r}
+library(dplyr)
+library(rsample)
+
+## check whether the rownames of y_austria_cleaned are the same as the rownames of X_austria_cleaned
+all(rownames(y_austria_cleaned) == rownames(X_austria_cleaned$intact)) # TRUE
+all(rownames(y_austria_cleaned) == rownames(X_austria_cleaned$ground)) # TRUE
+
+# Prep the stratification column for austrian dataset
+data_to_split_austria <- y_austria_cleaned %>%
+  mutate(Stratify_Group = paste(DON_2, DON_4, sep = "_"))
+y_austria_final <- y_austria_cleaned %>%
+  select(
+    DON = Deoxynivalenol,
+    Total_DON = `Total DON`
+  )
+
+# Generate the 100 perfectly stratified splits
+set.seed(123)
+cv_splits_austria <- mc_cv(data_to_split_austria, prop = 0.80, times = 100, strata = Stratify_Group)
+
+# Loop through the 100 splits
+for (i in 1:nrow(cv_splits_austria)) {
+  
+  # 1. Extract the integer indices for this specific split
+  train_indices <- cv_splits_austria$splits[[i]]$in_id
+  
+  # 2. Slice all matrices simultaneously
+  # --- Intact Spectra ---
+  X_intact_train <- X_austria_cleaned$intact[train_indices, ]
+  X_intact_test  <- X_austria_cleaned$intact[-train_indices, ]
+  
+  # --- Ground Spectra ---
+  X_ground_train <- X_austria_cleaned$ground[train_indices, ]
+  X_ground_test  <- X_austria_cleaned$ground[-train_indices, ]
+  
+  # --- Target (Y) Data ---
+  y_train <- y_austria_final[train_indices, ]
+  y_test  <- y_austria_final[-train_indices, ]
+  
+  # 3. Format the split number so files align perfectly (001, 002... 100)
+  split_num <- sprintf("%03d", i)
+  
+  # 4. Export all 6 files for the current iteration
+  write.csv(X_intact_train, paste0("./data/train_test_set_austrian/X_intact_train_", split_num, ".csv"))
+  write.csv(X_intact_test,  paste0("./data/train_test_set_austrian/X_intact_test_", split_num, ".csv"))
+  
+  write.csv(X_ground_train, paste0("./data/train_test_set_austrian/X_ground_train_", split_num, ".csv"))
+  write.csv(X_ground_test,  paste0("./data/train_test_set_austrian/X_ground_test_", split_num, ".csv"))
+  
+  write.csv(y_train, paste0("./data/train_test_set_austrian/y_train_", split_num, ".csv"))
+  write.csv(y_test,  paste0("./data/train_test_set_austrian/y_test_", split_num, ".csv"))
+  
+  # Print progress to the console
+  if (i %% 10 == 0) cat("Exported full datasets for split", i, "of 100...\n")
+}
+
+cat("Finished! All 600 datasets are saved in the 'train_test_set_austrian' folder.\n")
+```
