@@ -235,8 +235,8 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
 
 # Define the configurations for the 4 runs
 run_configs <- list(
-  list(threshold = 1000, weighted = "none", toxin = "Total_DON",       output = "plsda_1000_all.csv"),
-  list(threshold = 1000, weighted = "triangle", toxin = "Total_DON",       output = "weighted_plsda_1000_all.csv")
+  list(threshold = 1000, weighted = "triangle", toxin = "DON",       output = "DON.csv"),
+  list(threshold = 1000, weighted = "triangle", toxin = "Total_DON",       output = "Total_DON.csv")
 )
 
 # Loop through each configuration
@@ -258,7 +258,7 @@ for (cfg in run_configs) {
     apply_downsampling = TRUE 
   )
   
-  output_path <- file.path("./results/F1/1000", cfg$output)
+  output_path <- file.path("./results/F1/DON_Total_DON", cfg$output)
   write.csv(res_with_ds, output_path, row.names = FALSE)
   
   message(sprintf("Saved combined results to %s\n", output_path))
