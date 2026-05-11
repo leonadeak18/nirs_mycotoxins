@@ -388,3 +388,99 @@ tnr_plots <- ggarrange(tn_plot, tn_weighting_plot, tn_downsampling_plot, tn_toxi
 ggsave("./figures/PLS_DA/total_don/tnr_density_plots.svg", tnr_plots, width = 12, height = 6)
 
 ```
+
+### FP and FN analysis for the most optimal pipeline
+
+```{r}
+# import the csv files
+# Load required libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(readxl)
+
+# 1. Load your results data (adjust the path if necessary)
+results_f1 <- list(
+  none = read.csv("./results/F1/1000/plsda_1000_all.csv"),
+  weighted = read.csv("./results/F1/1000/weighted_plsda_1000_all.csv"))
+
+# 2. Extract and separate the FP and FN samples into a long format
+# This splits the "Sample_A; Sample_B" strings into individual rows
+missclassified_samples <- lapply(results_f1, function(df) {
+  fp_df <- df %>%
+    select(Split, FP_Samples) %>%
+    filter(FP_Samples != "", !is.na(FP_Samples)) %>%
+    separate_rows(FP_Samples, sep = ";\\s*") %>%
+    rename(Sample_ID = FP_Samples) %>%
+    mutate(Misclassification = "False Positive (FP)")
+  
+  fn_df <- df %>%
+    select(Split, FN_Samples) %>%
+    filter(FN_Samples != "", !is.na(FN_Samples)) %>%
+    separate_rows(FN_Samples, sep = ";\\s*") %>%
+    rename(Sample_ID = FN_Samples) %>%
+    mutate(Misclassification = "False Negative (FN)")
+  
+  bind_rows(fp_df, fn_df)
+})
+
+y <- read_excel("data/nirs_intact.xlsx") %>% dplyr::select(c("Sample_ID", "Total DON"))
+missclassified_samples <- lapply(missclassified_samples, function(df) {
+  df %>%
+    inner_join(y, by = "Sample_ID") %>%
+    mutate(
+      Uncertainty = case_when(
+        `Total DON` < 700 ~ "False Positive (FP)",
+        `Total DON` > 1300 ~ "False Negative (FN)",
+        `Total DON` < 1000 ~ "Uncertain False Positive (UFP)",
+        TRUE ~ "Uncertain False Negative (UFN)"
+      ),
+      Uncertainty = factor(Uncertainty, levels = c("False Positive (FP)", "Uncertain False Positive (UFP)", "Uncertain False Negative (UFN)", "False Negative (FN)"))
+    )
+})
+
+sum(missclassified_samples$none$Misclassification == "False Negative (FN)") + sum(missclassified_samples$none$Uncertainty == "False Positive (FP)")
+sum(missclassified_samples$weighted$Misclassification == "False Negative (FN)") + sum(missclassified_samples$weighted$Uncertainty == "False Positive (FP)")
+str(missclassified_samples)
+# 4. Create a histogram plot
+source("./utils/plotting.R")
+missclassified_plot <- lapply(missclassified_samples, function(df){
+  return(hist_plot(df))
+})
+missclassified_plot$none
+missclassified_plot$weighted
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# First, let's combine your two tibbles into one cozy dataframe
+df_combined <- bind_rows(
+  missclassified_samples$none %>% mutate(Weighting = "False"),
+  missclassified_samples$weighted %>% mutate(Weighting = "True")
+)
+
+# Create the grouped bar chart
+ggplot(df_combined, aes(x = Misclassification, fill = Weighting)) +
+  geom_bar(position = "dodge", color = "black", alpha = 0.8) +
+  theme_minimal() +
+  scale_fill_manual(values = c("False" = "#88CCEE", "True" = "#CC6677")) +
+  labs(title = "How Weighting Shifts Misclassification Types",
+       x = "Type of Misclassification",
+       y = "Number of Samples") +
+  theme(legend.position = "top")
+
+# Create the overlapping density plot
+error_desity <- ggplot(df_combined, aes(x = `Total DON`, fill = Weighting)) +
+  geom_density(alpha = 0.5) +
+  theme_classic() +
+  scale_fill_manual(values = c("False" = "#FFC20A", "True" = "#0C7BDC")) +
+  labs(x = "Total DON (µg/kg)",
+       y = "Density") +
+  theme(legend.position = "top") +
+  theme(legend.title = element_blank())
+ggsave("./figures/PLS_DA/total_don/misclassification_density_plot.svg", error_desity, width = 8, height = 5, dpi = 300)
+```

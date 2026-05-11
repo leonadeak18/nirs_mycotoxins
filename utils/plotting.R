@@ -299,13 +299,13 @@ plot_effect <- function(model, factor, title, y = "Estimated F1 Score",
   return(list(plot = output, data = emms_df))
 }
 
-hist_plot <- function(data){
-  output <- ggplot(data, aes(x = Deoxynivalenol, fill = Uncertainty)) +
+hist_plot <- function(data, x = "Total DON") {
+  output <- ggplot(data, aes(x = .data[[x]], fill = Uncertainty)) +
     geom_histogram(boundary = 1000, binwidth = 100, position = "identity") + 
     geom_vline(xintercept = 1000, linetype = "dashed", color = "black", linewidth = 1) + 
     theme_classic(base_size = 14) +
     labs(
-      x = "DON (ppb)",
+      x = paste(x, "(µg/kg)"),
       y = "Count",
     ) +
     scale_fill_manual(values = c("False Positive (FP)" = "#ef233c",
