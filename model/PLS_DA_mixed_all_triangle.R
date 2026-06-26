@@ -42,7 +42,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
       
       for (toxin in target_toxins) {
         
-        # 1. Extract Raw Data for this split
+        # Extract Raw Data for this split
         X_train_raw <- as.matrix(nirs_data$X_train[[material]][[i]])
         X_test_raw  <- as.matrix(nirs_data$X_test[[material]][[i]])
         
@@ -50,7 +50,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
         y_train      <- ifelse(y_train_raw == "HC", "1", "0")
         names(y_train) <- rownames(X_train_raw)
 
-        # 2. Conditionally assign weights
+        # Conditionally assign weights
         if (use_weights) {
           w_train <- as.numeric(unlist(nirs_data$y_train[[material]][[i]][[toxin]]$Weight))
           names(w_train) <- rownames(X_train_raw)
@@ -58,10 +58,10 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
           w_train <- NULL
         }
 
-        # 3. Apply Downsampling
+        # Apply Downsampling
         if (apply_downsampling) {
           class_0_idx <- which(y_train == "0")
-          class_1_idx <- which(y_train == "1") # Always minority
+          class_1_idx <- which(y_train == "1") # HC is always the minority class
           
           target_size <- length(class_1_idx)
           
@@ -96,7 +96,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
         y_test_raw   <- unlist(nirs_data$y_test[[material]][[i]][[toxin]]$Class)
         y_test       <- ifelse(y_test_raw == "HC", "1", "0")
         
-        # 4. Proceed with Preprocessing & Modeling
+        # Proceed with Preprocessing & Modeling
         for (prep_name in preps) {
           
           X_train_prep <- prep_methods[[prep_name]](X_train_raw)
@@ -111,7 +111,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
               match(varsel_name, varsel_names) * 10L
             set.seed(combo_seed)
             
-            # 5. CV on full variable set to find true optimal LV
+            # CV on full variable set to find true optimal LV
             res_nlv_full <- plsr_plsda_allsteps(
               X = X_train_prep, Xname = NULL, Xscaling = "none",
               Y = y_train, Yscaling = "none", weights = w_train,
@@ -124,7 +124,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
             
             opt_nlv <- which(res_nlv_full$optimum == 1)[1]
             
-            # 6. Variable selection using rchemo VIP at opt_nlv
+            # Variable selection using rchemo VIP at opt_nlv
             selected_vars <- varsel_methods[[varsel_name]](
               x       = X_train_prep,
               y       = y_train,
@@ -132,7 +132,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
               weights = w_train
             )
             
-            # Guard: if VIP > 1 selects zero variables, fall back to all
+            # if VIP > 1 selects zero variables, fall back to all
             if (length(selected_vars) == 0) {
               warning(sprintf(
                 "VIP selected 0 variables for split %d | %s | %s | %s. Falling back to all variables.",
@@ -144,7 +144,7 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
             X_train_prep_sel <- X_train_prep[, selected_vars, drop = FALSE]
             X_test_prep_sel  <- X_test_prep[, selected_vars, drop = FALSE]
             
-            # 7. Refit final model on selected variables at opt_nlv
+            # Refit final model on selected variables at opt_nlv
             final_mod <- plsrda(X = X_train_prep_sel, y = y_train, weights = w_train, nlv = opt_nlv)
             preds     <- predict(final_mod, X_test_prep_sel)
             
@@ -229,9 +229,9 @@ pipeline_binary_plsda_sequential <- function(nirs_data, target_toxins, use_weigh
 
 # Define the configurations for the 4 runs
 run_configs <- list(
-  #list(threshold = 1000, weighted = "none", toxin = "DON",       output = "plsda_1000_all.csv"),
+  list(threshold = 1000, weighted = "none", toxin = "DON",       output = "plsda_1000_all.csv"),
   list(threshold = 1000, weighted = "none", toxin = "Total_DON", output = "plsda_total_don_all.csv"),
-  #list(threshold = 1000, weighted = "triangle", toxin = "DON",       output = "weighted_plsda_1000_all.csv"),
+  list(threshold = 1000, weighted = "triangle", toxin = "DON",       output = "weighted_plsda_1000_all.csv"),
   list(threshold = 1000, weighted = "triangle", toxin = "Total_DON", output = "weighted_plsda_total_don_all.csv")
 )
 
@@ -265,7 +265,7 @@ for (cfg in run_configs) {
   
   combined_results <- rbind(res_no_ds, res_with_ds)
   
-  output_path <- file.path("./results/triangle/total_don/mixed_all/", cfg$output)
+  output_path <- file.path("./results/mixed_all/", cfg$output)
   write.csv(combined_results, output_path, row.names = FALSE)
   
   message(sprintf("Saved combined results to %s\n", output_path))

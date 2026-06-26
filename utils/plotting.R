@@ -1,6 +1,8 @@
 library(ggplot2)
 library(donutsk)
 library(dplyr)
+library(ggpubr)
+library(viridis)
 
 plot_spectra <- function(spectra, title, y_label = "log (1/R)", color) {
   n_groups <- length(unique(spectra[[color]]))
@@ -17,7 +19,7 @@ plot_spectra <- function(spectra, title, y_label = "log (1/R)", color) {
   } else if (n_groups == 4) {
     output <- output + scale_color_manual(values = c("#1982c4", "#ef233c", "#b6d5e9", "#f7c1bb"))
   } else {
-    output <- output + scale_color_viridis_d() # default color palette for more than 4 categories
+    output <- output + scale_color_viridis_d()
   }
   
   return(output)
@@ -30,20 +32,19 @@ plot_pca <- function(input, input2, title, color, shape = NULL) {
 
   n_groups <- length(unique(input[[color]]))
   
-  # 1. Base plot (without shape)
+  # Base plot (without shape)
   output <- ggplot(data = input, aes(x = `Comp 1`, y = `Comp 2`, color = .data[[color]])) 
   
-  # 2. Add points conditionally based on whether 'shape' is provided
+  # Shape identification
   if (!is.null(shape)) {
     output <- output + 
       geom_point(aes(shape = .data[[shape]]), size = 3) +
-      scale_shape_manual(values = c(15:18))
+      scale_shape_manual(values = c(16, 17))
   } else {
     output <- output + 
       geom_point(size = 3)
   }
   
-  # 3. Add the rest of your formatting
   output <- output +
     theme_minimal(base_family = "Arial") +
     xlab(paste("PC1 (", round(input2[1], 2), "%)", sep = "")) +
@@ -63,7 +64,7 @@ plot_pca <- function(input, input2, title, color, shape = NULL) {
     geom_hline(yintercept = 0, linetype = "dotted", color = "black") + 
     geom_vline(xintercept = 0, linetype = "dotted", color = "black")
 
-  # 4. Apply colors
+  # Apply colors
   if (n_groups == 2) {
     output <- output + scale_color_manual(values = c("#1982c4", "#ef233c"))
   } else if (n_groups == 4) {
@@ -112,46 +113,8 @@ plot_stacked_counts <- function(data, x_var, fill_var, title = NULL, x_label = N
   } else if (n_groups == 4) {
     output <- output + scale_fill_manual(values = c("#1982c4", "#b6d5e9", "#f7c1bb", "#ef233c"))
   } else {
-    output <- output + scale_fill_viridis_d() # default color palette for more than 4 categories
+    output <- output + scale_fill_viridis_d()
   }
-  
-  return(output)
-}
-
-plot_piedonut <- function(main, inner_donut, outer_donut, title = NULL) {
-  df <- main %>%
-        filter(.data[[inner_donut]] %in% c("C", "NC")) %>%
-        mutate(
-          Class = ifelse(.data[[inner_donut]] == "C", "Compliant", "Non-Compliant"),
-          Uncertainty = ifelse(.data[[outer_donut]] %in% c("UNC", "UC"), "Uncertain", "Certain")
-        ) %>%
-        count(Class, Uncertainty, name = "Count") %>%
-        mutate(total_count = sum(Count)) %>%
-        mutate(Outer_Pct = paste0(round((Count / total_count) * 100, 1), "%")) %>%
-        group_by(Class) %>%
-        mutate(Inner_Pct = paste0(round((sum(Count) / total_count) * 100, 1), "%")) %>%
-        ungroup()
-
-  output <- ggplot(df, aes(value = Count, fill = Class)) +
-    # --- Inner Ring  ---
-    geom_donut_int(r_int = 0.1, color = "white", linewidth = 1) +
-    geom_text_int(aes(label = Inner_Pct), r = 0.5, color = "white", fontface = "bold", size = 5) +
-    
-    # --- Outer Ring ---
-    geom_donut_ext(aes(alpha = Uncertainty), color = "white", linewidth = 1, r_int = 1.2, r_ext = 1.6) +
-    geom_text_ext(aes(label = Outer_Pct), layout = circle(r = 1.4), color = "black", size = 5) +
-    
-    scale_fill_manual(values = c("Compliant" = "#2E86C1", "Non-Compliant" = "#E74C3C")) +
-    scale_alpha_manual(values = c("Certain" = 1.0, "Uncertain" = 0.35)) +
-    coord_radial(theta = "y", expand = FALSE) +
-    theme_void() +
-    labs(title = title) +
-    theme(
-      legend.position = "top",
-      legend.title = element_blank(),
-      plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
-      legend.text = element_text(size = 10)
-    )
   
   return(output)
 }
@@ -165,19 +128,19 @@ plot_top_pipelines <- function(pipeline_emmeans,
   require(patchwork)
   require(multcomp)
   
-  # 1. Get indices of top 10 from the emmeans object
+  # Get indices of top 10 from the emmeans object
   top10_idx <- order(as.data.frame(pipeline_emmeans)$emmean, 
                      decreasing = TRUE)[1:10]
   top10_means <- pipeline_emmeans[top10_idx]
   
-  # 2. Run cld() on the top 10
+  # Run cld() on the top 10
   cld_top10 <- cld(top10_means,
                    adjust  = "sidak",
                    Letters = letters,
                    decreasing = TRUE) %>%
     as.data.frame()
   
-  # 3. Apply custom back-transformation and prepare the data
+  # Apply custom back-transformation and prepare the data
   df_clean <- cld_top10 %>%
     mutate(
       pipeline = paste(Grinding, Toxin, Preprocessing,
@@ -198,7 +161,7 @@ plot_top_pipelines <- function(pipeline_emmeans,
       Pipeline_ID = factor(Pipeline_ID, levels = rev(paste("Pipeline", row_number())))
     )
   
-  # 4. Create the Left Plot: The Parameter Matrix
+  # Create the Left Plot: The Parameter Matrix
   param_data <- df_clean %>%
     dplyr::select(
       G = Grinding, 
@@ -206,20 +169,20 @@ plot_top_pipelines <- function(pipeline_emmeans,
       P = Preprocessing, 
       Vs = Variable_Selection, 
       W = Weighting,
-      D = Downsampling,
+      B = Downsampling,
       Ds = Dataset,
       Pipeline_ID
     ) %>%
     pivot_longer(-Pipeline_ID, names_to = "Parameter", values_to = "Setting")
   
   param_data$Parameter <- factor(param_data$Parameter, 
-                                 levels = c("G", "T", "P", "Vs", "W", "D", "Ds"))
+                                 levels = c("Ds", "B", "G", "T", "W", "P", "Vs"))
   
   p_matrix <- ggplot(param_data, aes(x = Parameter, y = Pipeline_ID)) +
     geom_tile(fill = "white", color = "white", linewidth = 0.5, alpha = 0.3) +
     geom_text(aes(label = Setting), size = 3, color = "black") +
     scale_fill_discrete(guide = "none") + 
-    scale_x_discrete(position = "top") +  
+    scale_x_discrete(position = "top") +
     labs(
       title    = paste("Top 10 Pipelines by Estimated", metric_name),
       subtitle = "Shared letters = not significantly different\n",
@@ -233,7 +196,7 @@ plot_top_pipelines <- function(pipeline_emmeans,
       panel.grid      = element_blank()
     )
   
-  # 5. Create the Right Plot
+  # Create the Right Plot
   x_min <- min(df_clean$LCL, na.rm = TRUE)
   x_max <- max(df_clean$UCL, na.rm = TRUE)
   x_range <- x_max - x_min
@@ -258,23 +221,25 @@ plot_top_pipelines <- function(pipeline_emmeans,
     labs(
       x        = paste("Estimated", metric_name),
       y        = NULL,
-      caption  = "Abbreviations: G (Grinding), T (Toxin), P (Spectral Preprocessing), Vs (Variable Selection), W (Weighting), D (Downsampling), Ds (Dataset)\nError bars = 95% Confidence Interval"
+      caption  = "Abbreviations: G (Grinding), T (Toxin), P (Spectral Preprocessing), Vs (Variable Selection), W (Weighting), B (Balancing), Ds (Dataset)\nError bars = 95% Confidence Interval"
     ) +
     theme_bw(base_size = 11) +
     theme(
       axis.text.y     = element_blank(), 
       axis.ticks.y    = element_blank(),
-      legend.position = "bottom",
+      legend.position = c(0.01, 0.99),
+      legend.direction = "horizontal",
+      legend.justification = c(0, 1),
       plot.caption    = element_text(size = 8, hjust = 1, color = "grey30"),
       panel.grid      = element_blank()
     )
   
   final_visualization <- p_matrix + p_scores + plot_layout(widths = c(1, 1.5))
   
-  return(final_visualization)
+  return(list(plot = final_visualization, data = df_clean))
 }
 
-plot_effect <- function(model, factor, title, y = "Estimated F1 Score", 
+plot_effect <- function(model, factor, title, X= NULL, y = "Estimated F1-Score", 
                         backtransform_fn = function(x) { plogis(x) }) {
   library(emmeans)
   emms <- emmeans(model, specs = factor)
@@ -291,7 +256,7 @@ plot_effect <- function(model, factor, title, y = "Estimated F1 Score",
             geom_point(size = 4) +
             scale_color_viridis_d() +
             theme_classic() +
-            labs(title = title, x = factor, y = y) +
+            labs(title = title, x = X, y = y) +
             theme(
               plot.title = element_blank(),
               legend.position = "none"
@@ -318,4 +283,16 @@ hist_plot <- function(data, x = "Total DON") {
       legend.title = element_blank()
     )
   return(output)
+}
+
+density_plot <- function(data, var, color, label, title){
+  plot <- ggplot(data, aes(x = var, fill = color)) +
+    geom_density(alpha = 0.5) +
+    theme_classic() +
+    scale_y_continuous(limits = c(0, 5)) +
+    labs(title = title, x = label, fill = color) +
+    scale_fill_viridis(discrete = TRUE) +
+    theme(legend.position = "top",
+    legend.title = element_blank())
+  return(plot)
 }
