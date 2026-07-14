@@ -131,7 +131,7 @@ check_collinearity(model_f1) # there is no collinearity issue in the model
 pp_check <- check_predictions(model_f1)
 pp <- plot(pp_check) + theme_classic()
 pp
-ggsave("./figures/PLS_DA/total_don/f1_prediction_check.svg", pp, width = 7, height = 5, dpi = 300) # prediction fit well with the observed data
+ggsave("./figures/PLS_DA/f1_prediction_check.svg", pp, width = 7, height = 5, dpi = 300) # prediction fit well with the observed data
 ```
 
 ### Pipeline Plotting
@@ -142,7 +142,7 @@ source("utils/plotting.R")
 # Export the final visualization
 pipeline_f1 <- plot_top_pipelines(pipeline_means_f1, metric_name = "F1-Score")
 pipeline_f1
-ggsave("./figures/PLS_DA/total_don/f1_top10_pipelines.svg", pipeline_f1, width = 10, height = 6, dpi = 300)
+ggsave("./figures/PLS_DA/f1_top10_pipelines.svg", pipeline_f1, width = 10, height = 6, dpi = 300)
 
 # export the Figure 3
 fig3 <- pipeline_f1$plot & labs(title = NULL, subtitle = NULL, caption = NULL)
@@ -175,7 +175,7 @@ combined_effect_plot <- ggarrange(
   ncol = 4, nrow = 2, labels = c("A", "B", "C", "D", "E", "F", "G"))
 
 combined_effect_plot
-ggsave("./figures/PLS_DA/total_don/f1_main_effects.svg", combined_effect_plot, width = 12, height = 6, dpi = 300)
+ggsave("./figures/PLS_DA/f1_main_effects.svg", combined_effect_plot, width = 12, height = 6, dpi = 300)
 ```
 
 ### Plotting
@@ -192,7 +192,7 @@ f1_preprocessing_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Prep
 f1_variable_selection_plot <- density_plot(lme_data, lme_data$F1_score, lme_data$Variable_Selection, label = "F1-Score", title = "Effect of Variable Selection") + scale_y_continuous(limits = c(0, 6))
 f1_plots <- ggarrange(f1_plot, f1_weighting_plot, f1_downsampling_plot, f1_toxin_plot, f1_dataset_plot, f1_grinding_plot, f1_preprocessing_plot, f1_variable_selection_plot,
           ncol = 4, nrow = 2)
-ggsave("./figures/PLS_DA/total_don/f1_density_plots.svg", f1_plots, width = 12, height = 6)
+ggsave("./figures/PLS_DA/f1_density_plots.svg", f1_plots, width = 12, height = 6)
 
 # create for Figure 2
 fig2_a <- f1_plot + labs(title = NULL) + theme(legend.position = "top", axis.title.x = element_blank())
@@ -229,11 +229,6 @@ control = glmmTMBControl(optCtrl = list(iter.max = 1000, eval.max = 1000)))
 Anova(model_tpr, type = "II")
 summary(model_tpr)
 
-# determine the ICC (intraclass correlation) of the model
-library(performance)
-icc(model_tpr)
-r2(model_tpr)
-
 ```
 
 ### Model validation for TPR
@@ -243,7 +238,7 @@ r2(model_tpr)
 library(performance)
 library(see)
 icc(model_tpr)
-r2(model_tpr) #explain 91.1% of the variance in TPR score
+r2(model_tpr) #explain 92.0% of the variance in TPR score
 check_collinearity(model_tpr) # there is no collinearity issue in the model
 pp_check_tpr <- check_predictions(model_tpr)
 pp_tpr <- plot(pp_check_tpr) + theme_classic() + labs(title = NULL, subtitle = NULL, x = "TPR") # prediction fit well with the observed data
@@ -253,7 +248,7 @@ pp_tpr
 pp <- plot(pp_check) + theme_classic() + labs(title = NULL, subtitle = NULL, x = "F1-Score")
 library(ggpubr)
 pp_combined <- ggarrange(pp, pp_tpr, ncol = 2, labels = c("A", "B"), common.legend = TRUE, legend = "top")
-ggsave("./figures/PLS_DA/total_don/model_prediction_check.svg", pp_combined, width = 12, height = 5, dpi = 300)
+ggsave("./figures/PLS_DA/model_prediction_check.svg", pp_combined, width = 12, height = 5, dpi = 300)
 ```
 
 ### Plotting for each factor for TPR
@@ -267,9 +262,10 @@ names(effect_plots_tpr) <- effects
 source("utils/plotting.R")
 # Combining all effects into a single plot
 combined_effect_tpr_plot <- ggarrange(plotlist = 
-  effect_plots_tpr$Dataset$plot, effect_plots_tpr$Downsampling$plot, effect_plots_tpr$Grinding$plot, effect_plots_tpr$Toxin$plot, effect_plots_tpr$Weighting$plot, effect_plots_tpr$Preprocessing$plot, effect_plots_tpr$Variable_Selection$plot, 
+  effect_plots_tpr$Variable_Selection$plot, effect_plots_tpr$Dataset$plot, effect_plots_tpr$Downsampling$plot, effect_plots_tpr$Grinding$plot, effect_plots_tpr$Toxin$plot, effect_plots_tpr$Weighting$plot, effect_plots_tpr$Preprocessing$plot,
   ncol = 4, nrow = 2, labels = c("A", "B", "C", "D", "E", "F", "G"))
-ggsave("./figures/PLS_DA/total_don/tpr_main_effects.svg", combined_effect_tpr_plot, width = 12, height = 6, dpi = 300)
+combined_effect_tpr_plot
+ggsave("./figures/PLS_DA/tpr_main_effects.svg", combined_effect_tpr_plot, width = 12, height = 6, dpi = 300)
 ```
 
 ### Pipeline plotting for TPR
@@ -285,7 +281,7 @@ pipeline_means_tpr <- emmeans(model_tpr,
 source("utils/plotting.R")
 pipeline_tpr <- plot_top_pipelines(pipeline_means_tpr, metric_name = "TPR")
 export_pipeline_tpr <- pipeline_tpr$plot & labs(title = NULL, subtitle = NULL, caption = NULL)
-ggsave("./figures/PLS_DA/total_don/tpr_top10_pipelines.svg", export_pipeline_tpr, width = 13, height = 6, dpi = 300)
+ggsave("./figures/PLS_DA/tpr_top10_pipelines.svg", export_pipeline_tpr, width = 13, height = 6, dpi = 300)
 ```
 
 ### Plotting for TPR
@@ -303,7 +299,7 @@ tp_variable_selection_plot <- density_plot(lme_data, lme_data$TPR, lme_data$Vari
 
 tpr_plots <- ggarrange(tp_plot, tp_weighting_plot, tp_downsampling_plot, tp_toxin_plot, tp_dataset_plot, tp_grinding_plot, tp_preprocessing_plot, tp_variable_selection_plot,
           ncol = 4, nrow = 2)
-ggsave("./figures/PLS_DA/total_don/tpr_density_plots.svg", tpr_plots, width = 12, height = 6)
+ggsave("./figures/PLS_DA/tpr_density_plots.svg", tpr_plots, width = 12, height = 6)
 
 # for supplementary figure
 # create for Figure 2
@@ -325,7 +321,7 @@ tpr_plot <- annotate_figure(
   bottom = text_grob("True Positive Rate", color = "black", size = 12)
 )
 tpr_plot
-ggsave("./figures/PLS_DA/total_don/tpr_density_plots.svg", tpr_plot, width = 10.5, height = 6, units = "in", dpi = 600)
+ggsave("./figures/PLS_DA/tpr_density_plots.svg", tpr_plot, width = 10.5, height = 6, units = "in", dpi = 600)
 ```
 
 ### FP and FN analysis for the most optimal pipeline
@@ -441,7 +437,7 @@ error_density <- ggplot(df_combined, aes(x = `Total DON`, fill = Weighting)) +
            arrow = arrow(length = unit(0.2, "cm")))
 
 error_density
-ggsave("./figures/PLS_DA/total_don/misclassification_density_plot.svg", error_density, width = 8, height = 5, dpi = 300)
+ggsave("./figures/PLS_DA/misclassification_density_plot.svg", error_density, width = 8, height = 5, dpi = 300)
 ```
 
 ## Effect of DON and Total DON
@@ -515,5 +511,5 @@ error_density_don <- ggplot(df_combined_don, aes(x = Toxin_concentration, fill =
   theme(legend.position = "top") +
   theme(legend.title = element_blank())
 error_density_don
-ggsave("./figures/PLS_DA/total_don/misclassification_density_plot.svg", error_density_don, width = 8, height = 5, dpi = 300)
+ggsave("./figures/PLS_DA/misclassification_density_plot.svg", error_density_don, width = 8, height = 5, dpi = 300)
 ```

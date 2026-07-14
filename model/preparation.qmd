@@ -469,7 +469,7 @@ boxplot_DON<- ggplot(df_boxplot, aes(x = Country, y = Value)) +
                   
                   theme_classic() +
                   labs(
-                    y = "Concentration (ppb)",
+                    y = expression("Concentration (" * mu * "g/kg)"),
                     x = "",
                     color = "Classification"  
                   ) +
@@ -571,7 +571,7 @@ cross_plot <- ggplot(cross_samples_long, aes(x = Sample_ID, y = DON_Value, color
   annotate("text", x = Inf, y = 1000, label = "EC Threshold", vjust = -0.5, hjust = -0.1, color = "gray30", fontface = "bold") +
   
   labs(x = "Sample ID", 
-       y = "Concentration (ppb)") +
+       y = expression("Concentration (" * mu * "g/kg)")) +
   theme_classic() +
   scale_y_continuous(limits = c(500, max(cross_samples_long$DON_Value) * 1.5)) +
   scale_color_manual(values = c("DON" = "#FFC20A", "Total_DON" = "#0C7BDC"), labels = c("DON" = "DON", "Total_DON" = "Total DON")) +
