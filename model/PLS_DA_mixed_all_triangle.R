@@ -245,30 +245,30 @@ for (cfg in run_configs) {
   set.seed(270725)
   current_nirs_data <- load_nirs_data(weighted = cfg$weighted, threshold = cfg$threshold, base_path = "./data/train_test_set_all/")
   
-  use_weights_flag <- (cfg$weighted == "triangle")
+  # use_weights_flag <- (cfg$weighted == "triangle")
   
-  message("Running Phase 1: Without Downsampling...")
-  res_no_ds <- pipeline_binary_plsda_sequential(
-    nirs_data        = current_nirs_data, 
-    target_toxins    = cfg$toxin, 
-    use_weights      = use_weights_flag,
-    apply_downsampling = FALSE 
-  )
+  # message("Running Phase 1: Without Downsampling...")
+  # res_no_ds <- pipeline_binary_plsda_sequential(
+  #   nirs_data        = current_nirs_data, 
+  #   target_toxins    = cfg$toxin, 
+  #   use_weights      = use_weights_flag,
+  #   apply_downsampling = FALSE 
+  # )
   
-  message("Running Phase 2: With Downsampling...")
-  res_with_ds <- pipeline_binary_plsda_sequential(
-    nirs_data        = current_nirs_data, 
-    target_toxins    = cfg$toxin, 
-    use_weights      = use_weights_flag,
-    apply_downsampling = TRUE 
-  )
+  # message("Running Phase 2: With Downsampling...")
+  # res_with_ds <- pipeline_binary_plsda_sequential(
+  #   nirs_data        = current_nirs_data, 
+  #   target_toxins    = cfg$toxin, 
+  #   use_weights      = use_weights_flag,
+  #   apply_downsampling = TRUE 
+  # )
   
-  combined_results <- rbind(res_no_ds, res_with_ds)
+  # combined_results <- rbind(res_no_ds, res_with_ds)
   
-  output_path <- file.path("./results/mixed_all/", cfg$output)
-  write.csv(combined_results, output_path, row.names = FALSE)
+  # output_path <- file.path("./results/mixed_all/", cfg$output)
+  # write.csv(combined_results, output_path, row.names = FALSE)
   
-  message(sprintf("Saved combined results to %s\n", output_path))
+  # message(sprintf("Saved combined results to %s\n", output_path))
 }
 
 message("All pipelines completed successfully!")

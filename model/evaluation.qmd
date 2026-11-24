@@ -374,9 +374,20 @@ missclassified_samples <- lapply(missclassified_samples, function(df) {
     )
 })
 
-sum(missclassified_samples$none$Misclassification == "False Negative (FN)") + sum(missclassified_samples$none$Uncertainty == "False Positive (FP)")
-sum(missclassified_samples$weighted$Misclassification == "False Negative (FN)") + sum(missclassified_samples$weighted$Uncertainty == "False Positive (FP)")
-str(missclassified_samples)
+library(dplyr)
+library(tidyr)
+
+uncertainty_summary <- missclassified_samples %>%
+  bind_rows(.id = "Method") %>%
+  count(Method, Uncertainty, .drop = FALSE) %>%
+  pivot_wider(
+    names_from = Method,
+    values_from = n,
+    values_fill = 0
+  )
+
+uncertainty_summary
+
 # 4. Create a histogram plot
 source("./utils/plotting.R")
 missclassified_plot <- lapply(missclassified_samples, function(df){
