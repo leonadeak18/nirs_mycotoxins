@@ -36,6 +36,7 @@ pipeline_binary_plsda_sequential <- function(
   use_weights = FALSE,
   sampling_method = c("none", "downsample", "smote"),
   smote_k = 5,
+  smote_distance = "euclidean",
   max_nlv = 25
 ) {
   sampling_method <- match.arg(sampling_method)
@@ -114,44 +115,72 @@ pipeline_binary_plsda_sequential <- function(
           # Working copies so SMOTE does not overwrite y_train/w_train across preps
           y_train_cur <- y_train
           w_train_cur <- w_train
+          k_used      <- NA_integer_
 
-          # Apply SMOTE with Mahalanobis distance (after spectral preprocessing)
+          # Apply SMOTE directly (using only weight == 1 minority samples when weighted)
           if (sampling_method == "smote") {
-            min_class_n <- min(table(y_train_cur))
-            k_use <- min(smote_k, min_class_n - 1L)
+            if (use_weights) {
+              eligible_min_idx <- which(y_train_cur == "1" & w_train_cur == 1)
+              n_uncertain_min  <- sum(y_train_cur == "1" & w_train_cur < 1)
+            } else {
+              eligible_min_idx <- which(y_train_cur == "1")
+              n_uncertain_min  <- 0L
+            }
 
-            if (k_use < 1L) {
+            maj_idx      <- which(y_train_cur == "0")
+            n_maj        <- length(maj_idx)
+            n_min_elig   <- length(eligible_min_idx)
+            n_syn_needed <- n_maj - (n_min_elig + n_uncertain_min)
+            k_use        <- min(smote_k, n_min_elig - 1L)
+
+            if (n_syn_needed <= 0L || k_use < 1L) {
               warning(sprintf(
-                "Too few minority samples for SMOTE on split %d | %s | %s | %s. Skipping SMOTE.",
-                i, material, toxin, prep_name
+                "Skipping SMOTE on split %d | %s | %s | %s (eligible minority = %d, needed = %d).",
+                i, material, toxin, prep_name, n_min_elig, n_syn_needed
               ))
             } else {
+              k_used <- k_use
               smote_seed <- current_seed +
                 match(material, materials)  * 1000L +
                 match(toxin, target_toxins) * 100L +
                 match(prep_name, preps)     * 10L
+              set.seed(smote_seed)
 
-              df_train <- as.data.frame(X_train_prep)
-              df_train$y_target <- factor(y_train_cur, levels = c("0", "1"))
+              keep_idx <- c(maj_idx, eligible_min_idx)
+              df_smote <- as.data.frame(X_train_prep[keep_idx, , drop = FALSE])
+              df_smote$y_target <- factor(y_train_cur[keep_idx], levels = c("0", "1"))
 
-              smote_baked <- recipe(y_target ~ ., data = df_train) |>
-                step_smote(
-                  y_target,
-                  neighbors        = k_use,
-                  over_ratio       = 1,
-                  distance         = "mahalanobis",
-                  indicator_column = ".is_syn",
-                  seed             = smote_seed
-                ) |>
-                prep() |>
-                bake(new_data = NULL)
+              target_ratio <- (n_maj - n_uncertain_min) / n_maj
 
-              is_syn       <- smote_baked$.is_syn
-              y_train_cur  <- as.character(smote_baked$y_target)
-              X_train_prep <- as.matrix(smote_baked[, setdiff(names(smote_baked), c("y_target", ".is_syn")), drop = FALSE])
+              smote_out <- smote(
+                df         = df_smote,
+                var        = "y_target",
+                k          = k_use,
+                over_ratio = target_ratio,
+                distance   = smote_distance
+              )
 
-              if (use_weights) {
-                w_train_cur <- c(w_train_cur, rep(1, sum(is_syn)))
+              n_orig <- nrow(df_smote)
+              if (nrow(smote_out) > n_orig) {
+                syn_rows <- smote_out[(n_orig + 1):nrow(smote_out), , drop = FALSE]
+                X_syn    <- as.matrix(syn_rows[, setdiff(names(syn_rows), "y_target"), drop = FALSE])
+                colnames(X_syn) <- colnames(X_train_prep)
+
+                # Give synthetic rows explicit, matching IDs across X, Y, and weights
+                syn_ids <- paste0("SMOTE_", seq_len(nrow(X_syn)))
+                rownames(X_syn) <- syn_ids
+
+                y_syn <- as.character(syn_rows$y_target)
+                names(y_syn) <- syn_ids
+
+                X_train_prep <- rbind(X_train_prep, X_syn)
+                y_train_cur  <- c(y_train_cur, y_syn)
+
+                if (use_weights) {
+                  w_syn <- rep(1, nrow(X_syn))
+                  names(w_syn) <- syn_ids
+                  w_train_cur <- c(w_train_cur, w_syn)
+                }
               }
             }
           }
@@ -247,6 +276,7 @@ pipeline_binary_plsda_sequential <- function(
               Preprocessing      = prep_name,
               Variable_Selection = varsel_name,
               Sampling           = sampling_method,
+              SMOTE_k            = k_used,
               Split              = i,
               LV                 = opt_nlv,
               N_Vars_Selected    = length(selected_vars),
@@ -324,7 +354,7 @@ for (cfg in run_configs) {
     sampling_method = "downsample"
   )
 
-  message("Running Phase 3: With SMOTE (Mahalanobis)...")
+  message("Running Phase 3: With SMOTE (Euclidean)...")
   res_smote <- pipeline_binary_plsda_sequential(
     nirs_data       = current_nirs_data,
     target_toxins   = cfg$toxin,
